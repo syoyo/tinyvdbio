@@ -171,6 +171,13 @@ enum {
   OPENVDB_FILE_VERSION_MULTIPASS_IO = 224
 };
 
+enum {
+  COMPRESS_NONE           = 0,
+  COMPRESS_ZIP            = 0x1,
+  COMPRESS_ACTIVE_MASK    = 0x2,
+  COMPRESS_BLOSC          = 0x4
+};
+
 namespace {
 
 // In order not to break backward compatibility with existing VDB files,
@@ -245,6 +252,25 @@ static inline void swap8(tinyvdb::tinyvdb_uint64 *val) {
 #endif
 }
 
+static inline void swap8(tinyvdb::tinyvdb_int64 *val) {
+#ifdef MINIZ_LITTLE_ENDIAN
+  (void)val;
+#else
+  tinyvdb::tinyvdb_int64 tmp = (*val);
+  unsigned char *dst = reinterpret_cast<unsigned char *>(val);
+  unsigned char *src = reinterpret_cast<unsigned char *>(&tmp);
+
+  dst[0] = src[7];
+  dst[1] = src[6];
+  dst[2] = src[5];
+  dst[3] = src[4];
+  dst[4] = src[3];
+  dst[5] = src[2];
+  dst[6] = src[1];
+  dst[7] = src[0];
+#endif
+}
+
 static inline std::string ReadString(std::istream &is) {
   unsigned int size;
   is.read(reinterpret_cast<char *>(&size), sizeof(unsigned int));
@@ -257,6 +283,49 @@ static inline void WriteString(std::ostream &os, const std::string &name) {
   unsigned int size = static_cast<unsigned int>(name.size());
   os.write(reinterpret_cast<char *>(&size), sizeof(unsigned int));
   os.write(&name[0], size);
+}
+
+static inline bool ReadBool(std::istream &is) {
+  char c = 0;
+  unsigned int size;
+  is.read(reinterpret_cast<char *>(&size), sizeof(unsigned int));
+  if (size == 1) {
+    is.read(&c, 1);
+  }
+  return bool(c);
+}
+
+static inline float ReadFloat(std::istream &is) {
+  float f = 0.0f;
+  unsigned int size;
+  is.read(reinterpret_cast<char *>(&size), sizeof(unsigned int));
+  if (size == sizeof(float)) {
+    is.read(reinterpret_cast<char*>(&f), sizeof(float));
+    swap4(reinterpret_cast<unsigned int *>(&f));
+  }
+  return f;
+}
+
+static inline void ReadVec3i(std::istream &is, int v[3]) {
+  unsigned int size;
+  is.read(reinterpret_cast<char *>(&size), sizeof(unsigned int));
+  if (size == 3 * sizeof(int)) {
+    is.read(reinterpret_cast<char*>(v), 3 * sizeof(int));
+    swap4(&v[0]);
+    swap4(&v[1]);
+    swap4(&v[2]);
+  }
+}
+
+static inline tinyvdb_int64 ReadInt64(std::istream &is) {
+  tinyvdb_int64 i64 = 0;
+  unsigned int size;
+  is.read(reinterpret_cast<char *>(&size), sizeof(unsigned int));
+  if (size == 8) {
+    is.read(reinterpret_cast<char*>(&i64), 8);
+    swap8(&i64);
+  }
+  return i64;
 }
 
 // https://stackoverflow.com/questions/874134/find-if-string-ends-with-another-string-in-c
@@ -364,17 +433,39 @@ static bool ReadMeta(std::ifstream &is) {
       std::string value = ReadString(is);
 
       std::cout << "  value = " << value << std::endl;
+
     } else if (type_name.compare("vec3i") == 0) {
+      int v[3];
+      ReadVec3i(is, v);
+
+      std::cout << "  value = " << v[0] << ", " << v[1] << ", " << v[2] << std::endl;
 
     } else if (type_name.compare("bool") == 0) {
 
+      bool b = ReadBool(is);
+
+      std::cout << "  value = " << b << std::endl;
+
     } else if (type_name.compare("float") == 0) {
+
+      float f = ReadFloat(is);
+
+      std::cout << "  value = " << f << std::endl;
+
+    } else if (type_name.compare("int64") == 0) {
+
+      tinyvdb_int64 i64 = ReadInt64(is);
+
+      std::cout << "  value = " << i64 << std::endl;
   
     } else {
+
       // Unknown metadata
       int num_bytes;  
       is.read(reinterpret_cast<char*>(&num_bytes), sizeof(int));
       swap4(&num_bytes);
+
+      std::cout << "  unknown value. size = " << num_bytes << std::endl;
 
       std::vector<char> data;
       data.resize(size_t(num_bytes));
@@ -409,6 +500,22 @@ static void ReadGridDescriptors(std::ifstream &is, const unsigned int file_versi
   }
 
 }
+
+static void ReadGrid(std::ifstream &is, const unsigned int file_version, const GridDescriptor &gd) 
+{
+  if (file_version >= OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
+    unsigned int c = COMPRESS_NONE;
+    is.read(reinterpret_cast<char*>(&c), sizeof(unsigned int));
+    std::cout << "compression: " << c << std::endl;
+    //io::setDataCompression(is, c);
+  }
+
+  ReadMeta(is);
+
+  is.seekg(gd.GridPos());
+
+}
+
 
 bool ParseVDBHeader(const std::string &filename, std::string *err) {
   std::ifstream ifs(filename.c_str(), std::ifstream::binary);
@@ -499,10 +606,16 @@ bool ParseVDBHeader(const std::string &filename, std::string *err) {
   if (has_grid_offsets) {
     ReadGridDescriptors(ifs, file_version, &gd_map);
   } else {
+
   }
 
   // fixme
-  //ifs.seekg(gd
+  std::map<std::string, GridDescriptor>::iterator it(gd_map.begin());
+  //std::map<std::string, GridDescriptor>::iterator itEnd(gd_map.end());
+
+  //for (; it != itEnd; it++) {
+  ReadGrid(ifs, file_version, it->second);
+  //}
 
   return true;
 }
