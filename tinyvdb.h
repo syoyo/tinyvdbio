@@ -68,13 +68,30 @@ GridDescriptor
   //GridDescriptor& operator=(const GridDescriptor &rhs);
   ~GridDescriptor();
 
+  const std::string &GridName() const {
+    return grid_name_;
+  }
+
+  tinyvdb_int64 GridPos() const {
+    return grid_pos_;
+  }
+
+  tinyvdb_int64 BlockPos() const {
+    return block_pos_;
+  }
+
+  tinyvdb_int64 EndPos() const {
+    return end_pos_;
+  }
+
+
   static std::string AddSuffix(const std::string &name, int n);
   static std::string StripSuffix(const std::string &name);
 
   ///
   /// Read GridDescriptor from a stream.
   ///
-  void read(std::ifstream &is, const unsigned int n);
+  void Read(std::ifstream &is, const unsigned int n);
  
  private:
   std::string grid_name_;
@@ -122,6 +139,7 @@ bool SaveVDB(const std::string &filename, std::string *err);
 #include <iostream>
 #include <sstream>
 #include <vector>
+#include <map>
 
 namespace tinyvdb {
 
@@ -283,7 +301,7 @@ std::string GridDescriptor::StripSuffix(const std::string& name)
     return name.substr(0, name.find(SEP));
 }
 
-void GridDescriptor::read(std::ifstream &is, const unsigned int file_version) {
+void GridDescriptor::Read(std::ifstream &is, const unsigned int file_version) {
   unique_name_ = ReadString(is);
   grid_name_ = StripSuffix(unique_name_);
 
@@ -367,7 +385,7 @@ static bool ReadMeta(std::ifstream &is) {
   return true;
 }
 
-static void ReadGridDescriptors(std::ifstream &is, const unsigned int file_version) {
+static void ReadGridDescriptors(std::ifstream &is, const unsigned int file_version, std::map<std::string, GridDescriptor> *gd_map) {
 
   // Read the number of metadata items.
   int count = 0;
@@ -378,8 +396,9 @@ static void ReadGridDescriptors(std::ifstream &is, const unsigned int file_versi
   for (int i = 0; i < count; ++i) {
       // Read the grid descriptor.
       GridDescriptor gd;
-      gd.read(is, file_version);
+      gd.Read(is, file_version);
 
+      (*gd_map)[gd.GridName()] = gd;
 #if 0
       // Add the descriptor to the dictionary.
       gridDescriptors().insert(std::make_pair(gd.gridName(), gd));
@@ -475,10 +494,15 @@ bool ParseVDBHeader(const std::string &filename, std::string *err) {
     std::cout << "meta: " << ret << std::endl;
   }
 
+  std::map<std::string, GridDescriptor> gd_map;
+
   if (has_grid_offsets) {
-    ReadGridDescriptors(ifs, file_version);
+    ReadGridDescriptors(ifs, file_version, &gd_map);
   } else {
   }
+
+  // fixme
+  //ifs.seekg(gd
 
   return true;
 }
