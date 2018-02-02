@@ -2,6 +2,17 @@
 
 TinyVDB is header-only C++03 OpenVDB library. Not all features in OpenVDB are implemented.
 
+## Features
+
+* [x] Can be compiled with rather old C++03 compiler.
+* [x] Cross-platform(should be at least compilable on Linux, macOS and Windows)
+* [x] Limited support of loading OpenVDB data(version 220 or less)
+* [x] Simple saving of OpenVDB data.
+
+### TinyVDB only feature
+
+* [x] Support big endian machine(e.g. SPARC, POWER).
+
 ## How to use
 
 Simply copy `tinyvdb.h` to your project.
@@ -12,6 +23,33 @@ Simply copy `tinyvdb.h` to your project.
 
 ```
 $ git submodule update --init
+```
+
+## Notes
+
+Data format
+
+
+```
++-----------------+
+| header          |
++-----------------+
+| meta            |
++-----------------+
+| grid descriptor |
++-----------------+
+
+
++-----------------+   <- grid_pos
+| grid meta       |
++-----------------+
+| grid data       |
+|                 |
++-----------------+
+
+
+block_pos
+end_pos
 ```
 
 ## License

@@ -1,2 +1,2 @@
 all:
-	clang++ -o loader_test  -Weverything -Werror loader_test.cc
+	clang++ -o loader_test -fsanitize=address  -Weverything -Werror loader_test.cc
