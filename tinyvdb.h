@@ -501,6 +501,15 @@ static void ReadGridDescriptors(std::ifstream &is, const unsigned int file_versi
 
 }
 
+static void ReadTransform(std::ifstream &is)
+{
+  // Read the type name.
+  std::string type = ReadString(is);
+  
+  std::cout << "type = " << type << std::endl; 
+}
+
+
 static void ReadGrid(std::ifstream &is, const unsigned int file_version, const GridDescriptor &gd) 
 {
   if (file_version >= OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
@@ -511,6 +520,13 @@ static void ReadGrid(std::ifstream &is, const unsigned int file_version, const G
   }
 
   ReadMeta(is);
+
+  // read transform
+  ReadTransform(is);
+
+  // read topology
+  // Save the grid's structure.
+  //grid->writeTopology(os);
 
   is.seekg(gd.GridPos());
 
