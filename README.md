@@ -13,6 +13,19 @@ TinyVDB is header-only C++03 OpenVDB library. Not all features in OpenVDB are im
 
 * [x] Support big endian machine(e.g. SPARC, POWER).
 
+## Limitation on reading OpenVDB file with TinyVDB
+
+File version less than 220(`OPENVDB_FILE_VERSION_SELECTIVE_COMPRESSION`) is not supported.
+
+Currently, only `FloatTree`(`tree::Tree4<float,       5, 4, 3>::Type`) topology is supported.
+(At least example VDB files at http://www.openvdb.org/download/ could be read in TinyVDB)
+
+## TODO
+
+* [ ] Support points.
+* [ ] Support various topology type.
+
+
 ## How to use
 
 Simply copy `tinyvdb.h` to your project.

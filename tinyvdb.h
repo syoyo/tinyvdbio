@@ -58,32 +58,26 @@ typedef long long tinyvdb_int64;
 #pragma clang diagnostic ignored "-Wpadded"
 #endif
 
-class
-GridDescriptor
-{
+class GridDescriptor {
  public:
   GridDescriptor();
-  GridDescriptor(const std::string &name, const std::string &grid_type, bool save_float_as_half = false);
-  //GridDescriptor(const GridDescriptor &rhs);
-  //GridDescriptor& operator=(const GridDescriptor &rhs);
+  GridDescriptor(const std::string &name, const std::string &grid_type,
+                 bool save_float_as_half = false);
+  // GridDescriptor(const GridDescriptor &rhs);
+  // GridDescriptor& operator=(const GridDescriptor &rhs);
   ~GridDescriptor();
 
-  const std::string &GridName() const {
-    return grid_name_;
-  }
+  const std::string &GridName() const { return grid_name_; }
 
-  tinyvdb_int64 GridPos() const {
-    return grid_pos_;
-  }
+  bool IsInstance() const { return !instance_parent_name_.empty(); }
 
-  tinyvdb_int64 BlockPos() const {
-    return block_pos_;
-  }
+  bool SaveFloatAsHalf() const { return save_float_as_half_; }
 
-  tinyvdb_int64 EndPos() const {
-    return end_pos_;
-  }
+  tinyvdb_int64 GridPos() const { return grid_pos_; }
 
+  tinyvdb_int64 BlockPos() const { return block_pos_; }
+
+  tinyvdb_int64 EndPos() const { return end_pos_; }
 
   static std::string AddSuffix(const std::string &name, int n);
   static std::string StripSuffix(const std::string &name);
@@ -91,18 +85,66 @@ GridDescriptor
   ///
   /// Read GridDescriptor from a stream.
   ///
-  void Read(std::ifstream &is, const unsigned int n);
- 
+  bool Read(std::ifstream &is, const unsigned int file_version, std::string *err);
+
  private:
   std::string grid_name_;
   std::string unique_name_;
   std::string instance_parent_name_;
   std::string grid_type_;
 
-  bool save_float_as_half_; // use fp16?
+  bool save_float_as_half_;  // use fp16?
   tinyvdb_int64 grid_pos_;
   tinyvdb_int64 block_pos_;
   tinyvdb_int64 end_pos_;
+};
+
+///
+/// Leaf node contains actual voxel data.
+///
+class LeafNode {
+ public:
+  LeafNode();
+  ~LeafNode();
+
+ private:
+};
+
+///
+/// Internal node have `InternalNode` or `LeafNode` as children.
+///
+class InternalNode {
+ public:
+  InternalNode();
+  ~InternalNode();
+
+ private:
+};
+
+///
+/// Root node may have arbitrary child nodes.
+///
+template<typename ChildType>
+class RootNode {
+ public:
+  RootNode() {}
+  ~RootNode() {}
+
+  bool ReadTopology(std::istream &is, const bool fromHalf);
+
+ private:
+  ChildType background_; 
+};
+
+///
+/// Reader class for Tree data
+///
+class TreeReader {
+ public:
+  TreeReader();
+  ~TreeReader();
+
+  bool Read(std::istream &is);
 };
 
 #ifdef __clang__
@@ -126,7 +168,6 @@ bool ParseVDBHeader(const std::string &filename, std::string *err);
 bool ParseVDBHeader(const unsigned char *data, const size_t len,
                     std::string *err);
 
-
 ///
 /// Write VDB data to a file.
 ///
@@ -137,9 +178,10 @@ bool SaveVDB(const std::string &filename, std::string *err);
 #ifdef TINYVDB_IMPLEMENTATION
 
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <vector>
-#include <map>
+#include <cassert>
 
 namespace tinyvdb {
 
@@ -172,10 +214,10 @@ enum {
 };
 
 enum {
-  COMPRESS_NONE           = 0,
-  COMPRESS_ZIP            = 0x1,
-  COMPRESS_ACTIVE_MASK    = 0x2,
-  COMPRESS_BLOSC          = 0x4
+  COMPRESS_NONE = 0,
+  COMPRESS_ZIP = 0x1,
+  COMPRESS_ACTIVE_MASK = 0x2,
+  COMPRESS_BLOSC = 0x4
 };
 
 namespace {
@@ -184,10 +226,112 @@ namespace {
 // grids stored using 16-bit half floats are flagged by adding the following
 // suffix to the grid's type name on output.  The suffix is removed on input
 // and the grid's "save float as half" flag set accordingly.
-const char* HALF_FLOAT_TYPENAME_SUFFIX = "_HalfFloat";
+const char *HALF_FLOAT_TYPENAME_SUFFIX = "_HalfFloat";
 
-const char* SEP = "\x1e"; // ASCII "record separator"
+const char *SEP = "\x1e";  // ASCII "record separator"
 
+}  // namespace
+
+// https://gist.github.com/rygorous/2156668
+// Reuse MINIZ_LITTLE_ENDIAN flag from miniz.
+union FP32 {
+  unsigned int u;
+  float f;
+  struct {
+#if MINIZ_LITTLE_ENDIAN
+    unsigned int Mantissa : 23;
+    unsigned int Exponent : 8;
+    unsigned int Sign : 1;
+#else
+    unsigned int Sign : 1;
+    unsigned int Exponent : 8;
+    unsigned int Mantissa : 23;
+#endif
+  } s;
+};
+
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wpadded"
+#endif
+
+union FP16 {
+  unsigned short u;
+  struct {
+#if MINIZ_LITTLE_ENDIAN
+    unsigned int Mantissa : 10;
+    unsigned int Exponent : 5;
+    unsigned int Sign : 1;
+#else
+    unsigned int Sign : 1;
+    unsigned int Exponent : 5;
+    unsigned int Mantissa : 10;
+#endif
+  } s;
+};
+
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+
+static inline FP32 half_to_float(FP16 h) {
+  static const FP32 magic = {113 << 23};
+  static const unsigned int shifted_exp = 0x7c00
+                                          << 13;  // exponent mask after shift
+  FP32 o;
+
+  o.u = (h.u & 0x7fffU) << 13U;           // exponent/mantissa bits
+  unsigned int exp_ = shifted_exp & o.u;  // just the exponent
+  o.u += (127 - 15) << 23;                // exponent adjust
+
+  // handle exponent special cases
+  if (exp_ == shifted_exp)    // Inf/NaN?
+    o.u += (128 - 16) << 23;  // extra exp adjust
+  else if (exp_ == 0)         // Zero/Denormal?
+  {
+    o.u += 1 << 23;  // extra exp adjust
+    o.f -= magic.f;  // renormalize
+  }
+
+  o.u |= (h.u & 0x8000U) << 16U;  // sign bit
+  return o;
+}
+
+static inline FP16 float_to_half_full(FP32 f) {
+  FP16 o = {0};
+
+  // Based on ISPC reference code (with minor modifications)
+  if (f.s.Exponent == 0)  // Signed zero/denormal (which will underflow)
+    o.s.Exponent = 0;
+  else if (f.s.Exponent == 255)  // Inf or NaN (all exponent bits set)
+  {
+    o.s.Exponent = 31;
+    o.s.Mantissa = f.s.Mantissa ? 0x200 : 0;  // NaN->qNaN and Inf->Inf
+  } else                                      // Normalized number
+  {
+    // Exponent unbias the single, then bias the halfp
+    int newexp = f.s.Exponent - 127 + 15;
+    if (newexp >= 31)  // Overflow, return signed infinity
+      o.s.Exponent = 31;
+    else if (newexp <= 0)  // Underflow
+    {
+      if ((14 - newexp) <= 24)  // Mantissa might be non-zero
+      {
+        unsigned int mant = f.s.Mantissa | 0x800000;  // Hidden 1 bit
+        o.s.Mantissa = mant >> (14 - newexp);
+        if ((mant >> (13 - newexp)) & 1)  // Check for rounding
+          o.u++;  // Round, might overflow into exp bit, but this is OK
+      }
+    } else {
+      o.s.Exponent = static_cast<unsigned int>(newexp);
+      o.s.Mantissa = f.s.Mantissa >> 13;
+      if (f.s.Mantissa & 0x1000)  // Check for rounding
+        o.u++;                    // Round, might overflow to inf, this is OK
+    }
+  }
+
+  o.s.Sign = f.s.Sign;
+  return o;
 }
 
 static inline void swap2(unsigned short *val) {
@@ -300,7 +444,7 @@ static inline float ReadFloat(std::istream &is) {
   unsigned int size;
   is.read(reinterpret_cast<char *>(&size), sizeof(unsigned int));
   if (size == sizeof(float)) {
-    is.read(reinterpret_cast<char*>(&f), sizeof(float));
+    is.read(reinterpret_cast<char *>(&f), sizeof(float));
     swap4(reinterpret_cast<unsigned int *>(&f));
   }
   return f;
@@ -310,7 +454,7 @@ static inline void ReadVec3i(std::istream &is, int v[3]) {
   unsigned int size;
   is.read(reinterpret_cast<char *>(&size), sizeof(unsigned int));
   if (size == 3 * sizeof(int)) {
-    is.read(reinterpret_cast<char*>(v), 3 * sizeof(int));
+    is.read(reinterpret_cast<char *>(v), 3 * sizeof(int));
     swap4(&v[0]);
     swap4(&v[1]);
     swap4(&v[2]);
@@ -322,55 +466,153 @@ static inline tinyvdb_int64 ReadInt64(std::istream &is) {
   unsigned int size;
   is.read(reinterpret_cast<char *>(&size), sizeof(unsigned int));
   if (size == 8) {
-    is.read(reinterpret_cast<char*>(&i64), 8);
+    is.read(reinterpret_cast<char *>(&i64), 8);
     swap8(&i64);
   }
   return i64;
 }
 
 // https://stackoverflow.com/questions/874134/find-if-string-ends-with-another-string-in-c
-static inline bool EndsWidth(std::string const &value, std::string const &ending)
-{
+static inline bool EndsWidth(std::string const &value,
+                             std::string const &ending) {
   if (ending.size() > value.size()) return false;
   return std::equal(ending.rbegin(), ending.rend(), value.rbegin());
 }
 
+template<typename ValueType>
+bool RootNode<ValueType>::ReadTopology(std::istream &is, const bool fromHalf)
+{
+  // Read background value;
+  if (fromHalf) {
+    assert(sizeof(ValueType) == 4);
 
-GridDescriptor::GridDescriptor():
-  save_float_as_half_(false),
-  grid_pos_(0),
-  block_pos_(0),
-  end_pos_(0) {
+    // Assume stored value is fp16 and `ValueType` is float
+    unsigned short value = 0;
+    is.read(reinterpret_cast<char*>(&value), 2);
+    swap2(reinterpret_cast<unsigned short*>(&value));
+
+    {
+      FP16 fp16;
+      fp16.u = value;
+
+      FP32 fp32 = half_to_float(fp16);
+      
+      background_ = fp32.f;
+    }
+  } else {
+    is.read(reinterpret_cast<char*>(&background_), sizeof(ValueType));
+
+    if (2 == sizeof(ValueType)) {
+      swap2(reinterpret_cast<unsigned short*>(&background_));
+    } else if (4 == sizeof(ValueType)) {
+      swap4(reinterpret_cast<unsigned int*>(&background_));
+    } else if (8 == sizeof(ValueType)) {
+      swap8(reinterpret_cast<tinyvdb_uint64*>(&background_));
+    }
+  }
+
+
+  std::cout << "background : " << background_ << std::endl;
+
+  unsigned int num_tiles = 0;
+  unsigned int num_children = 0;
+  is.read(reinterpret_cast<char*>(&num_tiles), sizeof(unsigned int));
+  swap4(&num_tiles);
+  is.read(reinterpret_cast<char*>(&num_children), sizeof(unsigned int));
+  swap4(&num_children);
+
+  if ((num_tiles == 0) && (num_children == 0)) {
+    return false;
+  }
+
+  std::cout << "num_tiles " << num_tiles << std::endl;
+  std::cout << "num_children " << num_children << std::endl;
+
+  return true;
+
+  // Read tiles.
+  for (unsigned int n = 0; n < num_tiles; n++) {
+    int vec[3];
+    ValueType value;
+    bool active;
+
+    is.read(reinterpret_cast<char*>(vec), 3 * sizeof(int));
+    is.read(reinterpret_cast<char*>(&value), sizeof(ValueType));
+    is.read(reinterpret_cast<char*>(&active), sizeof(bool));
+    swap4(&vec[0]);
+    swap4(&vec[1]);
+    swap4(&vec[2]);
+
+    if (2 == sizeof(ValueType)) {
+      swap2(reinterpret_cast<unsigned short*>(&value));
+    } else if (4 == sizeof(ValueType)) {
+      swap4(reinterpret_cast<unsigned int*>(&value));
+    } else if (8 == sizeof(ValueType)) {
+      swap8(reinterpret_cast<tinyvdb_uint64*>(&value));
+    }
+    
+    std::cout << "[" << n << "] vec = (" << vec[0] << ", " << vec[1] << ", " << vec[2] << "), value = " << value << ", active = " << active << std::endl;
+  }
+
+
+  // Read child nodes.
+  for (unsigned int n = 0; n < num_children; n++) {
+    (void)fromHalf;
+#if 0 // TODO
+    int vec[3];
+    is.read(reinterpret_cast<char*>(vec), 3 * sizeof(int));
+
+    swap4(&vec[0]);
+    swap4(&vec[1]);
+    swap4(&vec[2]);
+
+    //ChildT* child = new ChildT(PartialCreate(), origin, mBackground);
+    //child->readTopology(is, fromHalf);
+    //mTable[Coord(vec)] = NodeStruct(*child);
+#endif
+  }
+
+  return true;
 }
 
-GridDescriptor::GridDescriptor(const std::string &name, const std::string &grid_type, bool save_float_as_half):
-  grid_name_(StripSuffix(name)),
-  unique_name_(name),
-  grid_type_(grid_type),
-  save_float_as_half_(save_float_as_half),
-  grid_pos_(0),
-  block_pos_(0),
-  end_pos_(0) {
+#if 0
+template<typename ChildT>
+bool TreeReader::Read(std::istream &is)
+{
+  
 }
+#endif
 
-//GridDescriptor::GridDescriptor(const GridDescriptor &rhs) {
+GridDescriptor::GridDescriptor()
+    : save_float_as_half_(false), grid_pos_(0), block_pos_(0), end_pos_(0) {}
+
+GridDescriptor::GridDescriptor(const std::string &name,
+                               const std::string &grid_type,
+                               bool save_float_as_half)
+    : grid_name_(StripSuffix(name)),
+      unique_name_(name),
+      grid_type_(grid_type),
+      save_float_as_half_(save_float_as_half),
+      grid_pos_(0),
+      block_pos_(0),
+      end_pos_(0) {}
+
+// GridDescriptor::GridDescriptor(const GridDescriptor &rhs) {
 //}
 
 GridDescriptor::~GridDescriptor() {}
 
-std::string GridDescriptor::AddSuffix(const std::string &name, int n)
-{
+std::string GridDescriptor::AddSuffix(const std::string &name, int n) {
   std::ostringstream ss;
   ss << name << SEP << n;
   return ss.str();
 }
 
-std::string GridDescriptor::StripSuffix(const std::string& name)
-{
-    return name.substr(0, name.find(SEP));
+std::string GridDescriptor::StripSuffix(const std::string &name) {
+  return name.substr(0, name.find(SEP));
 }
 
-void GridDescriptor::Read(std::ifstream &is, const unsigned int file_version) {
+bool GridDescriptor::Read(std::ifstream &is, const unsigned int file_version, std::string *err) {
   unique_name_ = ReadString(is);
   grid_name_ = StripSuffix(unique_name_);
 
@@ -379,8 +621,17 @@ void GridDescriptor::Read(std::ifstream &is, const unsigned int file_version) {
   if (EndsWidth(grid_type_, HALF_FLOAT_TYPENAME_SUFFIX)) {
     save_float_as_half_ = true;
     // strip suffix
-    std::string tmp = grid_type_.substr(0, grid_type_.find(HALF_FLOAT_TYPENAME_SUFFIX));
+    std::string tmp =
+        grid_type_.substr(0, grid_type_.find(HALF_FLOAT_TYPENAME_SUFFIX));
     grid_type_ = tmp;
+  }
+
+  // FIXME(syoyo): Currently only `Tree_float_5_4_3` is supported.
+  if (grid_type_.compare("Tree_float_5_4_3") != 0) {
+    if (err) {
+      (*err) = "Unsupported grid type: " + grid_type_;
+    }
+    return false;
   }
 
   std::cout << "grid_type = " << grid_type_ << std::endl;
@@ -388,29 +639,30 @@ void GridDescriptor::Read(std::ifstream &is, const unsigned int file_version) {
 
   if (file_version >= OPENVDB_FILE_VERSION_GRID_INSTANCING) {
     instance_parent_name_ = ReadString(is);
-    std::cout << "instance_parent_name = " << instance_parent_name_ << std::endl;
+    std::cout << "instance_parent_name = " << instance_parent_name_
+              << std::endl;
   }
 
   // Create the grid of the type if it has been registered.
-  //if (!GridBase::isRegistered(mGridType)) {
+  // if (!GridBase::isRegistered(mGridType)) {
   //    OPENVDB_THROW(LookupError, "Cannot read grid." <<
   //        " Grid type " << mGridType << " is not registered.");
   //}
   // else
-  //GridBase::Ptr grid = GridBase::createGrid(mGridType);
-  //if (grid) grid->setSaveFloatAsHalf(mSaveFloatAsHalf);
+  // GridBase::Ptr grid = GridBase::createGrid(mGridType);
+  // if (grid) grid->setSaveFloatAsHalf(mSaveFloatAsHalf);
 
   // Read in the offsets.
-  is.read(reinterpret_cast<char*>(&grid_pos_), sizeof(tinyvdb_int64));
-  is.read(reinterpret_cast<char*>(&block_pos_), sizeof(tinyvdb_int64));
-  is.read(reinterpret_cast<char*>(&end_pos_), sizeof(tinyvdb_int64));
+  is.read(reinterpret_cast<char *>(&grid_pos_), sizeof(tinyvdb_int64));
+  is.read(reinterpret_cast<char *>(&block_pos_), sizeof(tinyvdb_int64));
+  is.read(reinterpret_cast<char *>(&end_pos_), sizeof(tinyvdb_int64));
 
   std::cout << "grid_pos = " << grid_pos_ << std::endl;
   std::cout << "block_pos = " << block_pos_ << std::endl;
   std::cout << "end_pos = " << end_pos_ << std::endl;
 
+  return true;
 }
-
 
 static bool ReadMeta(std::ifstream &is) {
   // Read the number of metadata items.
@@ -438,31 +690,28 @@ static bool ReadMeta(std::ifstream &is) {
       int v[3];
       ReadVec3i(is, v);
 
-      std::cout << "  value = " << v[0] << ", " << v[1] << ", " << v[2] << std::endl;
+      std::cout << "  value = " << v[0] << ", " << v[1] << ", " << v[2]
+                << std::endl;
 
     } else if (type_name.compare("bool") == 0) {
-
       bool b = ReadBool(is);
 
       std::cout << "  value = " << b << std::endl;
 
     } else if (type_name.compare("float") == 0) {
-
       float f = ReadFloat(is);
 
       std::cout << "  value = " << f << std::endl;
 
     } else if (type_name.compare("int64") == 0) {
-
       tinyvdb_int64 i64 = ReadInt64(is);
 
       std::cout << "  value = " << i64 << std::endl;
-  
-    } else {
 
+    } else {
       // Unknown metadata
-      int num_bytes;  
-      is.read(reinterpret_cast<char*>(&num_bytes), sizeof(int));
+      int num_bytes;
+      is.read(reinterpret_cast<char *>(&num_bytes), sizeof(int));
       swap4(&num_bytes);
 
       std::cout << "  unknown value. size = " << num_bytes << std::endl;
@@ -476,8 +725,9 @@ static bool ReadMeta(std::ifstream &is) {
   return true;
 }
 
-static void ReadGridDescriptors(std::ifstream &is, const unsigned int file_version, std::map<std::string, GridDescriptor> *gd_map) {
-
+static void ReadGridDescriptors(std::ifstream &is,
+                                const unsigned int file_version,
+                                std::map<std::string, GridDescriptor> *gd_map) {
   // Read the number of metadata items.
   int count = 0;
   is.read(reinterpret_cast<char *>(&count), sizeof(int));
@@ -485,11 +735,13 @@ static void ReadGridDescriptors(std::ifstream &is, const unsigned int file_versi
   std::cout << "grid descriptors = " << count << std::endl;
 
   for (int i = 0; i < count; ++i) {
-      // Read the grid descriptor.
-      GridDescriptor gd;
-      gd.Read(is, file_version);
+    // Read the grid descriptor.
+    GridDescriptor gd;
+    std::string err;
+    bool ret = gd.Read(is, file_version, &err);
+    assert(ret);
 
-      (*gd_map)[gd.GridName()] = gd;
+    (*gd_map)[gd.GridName()] = gd;
 #if 0
       // Add the descriptor to the dictionary.
       gridDescriptors().insert(std::make_pair(gd.gridName(), gd));
@@ -498,25 +750,24 @@ static void ReadGridDescriptors(std::ifstream &is, const unsigned int file_versi
       gd.seekToEnd(is);
 #endif
   }
-
 }
 
-static void ReadTransform(std::ifstream &is)
-{
+static void ReadTransform(std::ifstream &is) {
   // Read the type name.
   std::string type = ReadString(is);
-  
-  std::cout << "type = " << type << std::endl; 
+
+  std::cout << "type = " << type << std::endl;
+
+  // TODO(syoyo) read transform
 }
 
-
-static void ReadGrid(std::ifstream &is, const unsigned int file_version, const GridDescriptor &gd) 
-{
+static void ReadGrid(std::ifstream &is, const unsigned int file_version,
+                     const GridDescriptor &gd) {
   if (file_version >= OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
     unsigned int c = COMPRESS_NONE;
-    is.read(reinterpret_cast<char*>(&c), sizeof(unsigned int));
+    is.read(reinterpret_cast<char *>(&c), sizeof(unsigned int));
     std::cout << "compression: " << c << std::endl;
-    //io::setDataCompression(is, c);
+    // io::setDataCompression(is, c);
   }
 
   ReadMeta(is);
@@ -525,13 +776,13 @@ static void ReadGrid(std::ifstream &is, const unsigned int file_version, const G
   ReadTransform(is);
 
   // read topology
-  // Save the grid's structure.
-  //grid->writeTopology(os);
+  if (!gd.IsInstance()) {
+    RootNode<float> rootNode;
+    rootNode.ReadTopology(is, gd.SaveFloatAsHalf());
+  }
 
   is.seekg(gd.GridPos());
-
 }
-
 
 bool ParseVDBHeader(const std::string &filename, std::string *err) {
   std::ifstream ifs(filename.c_str(), std::ifstream::binary);
@@ -578,8 +829,8 @@ bool ParseVDBHeader(const std::string &filename, std::string *err) {
   char has_grid_offsets = 0;
   if (file_version >= 212) {
     ifs.read(&has_grid_offsets, sizeof(char));
-    std::cout << "InputHasGridOffsets = " << (has_grid_offsets ? " yes " : " no ")
-              << std::endl;
+    std::cout << "InputHasGridOffsets = "
+              << (has_grid_offsets ? " yes " : " no ") << std::endl;
   }
 
   // 5) Read the flag that indicates whether data is compressed.
@@ -622,14 +873,13 @@ bool ParseVDBHeader(const std::string &filename, std::string *err) {
   if (has_grid_offsets) {
     ReadGridDescriptors(ifs, file_version, &gd_map);
   } else {
-
   }
 
   // fixme
   std::map<std::string, GridDescriptor>::iterator it(gd_map.begin());
-  //std::map<std::string, GridDescriptor>::iterator itEnd(gd_map.end());
+  // std::map<std::string, GridDescriptor>::iterator itEnd(gd_map.end());
 
-  //for (; it != itEnd; it++) {
+  // for (; it != itEnd; it++) {
   ReadGrid(ifs, file_version, it->second);
   //}
 
@@ -646,7 +896,6 @@ bool ParseVDBHeader(const unsigned char *data, const size_t len,
 }
 
 static bool WriteVDBHeader(std::ostream &os) {
-
   // [0:7] magic number
   tinyvdb_int64 magic = kOPENVDB_MAGIC;
   os.write(reinterpret_cast<char *>(&magic), 8);
@@ -733,7 +982,7 @@ bool SaveVDB(const std::string &filename, std::string *err) {
   }
 
   WriteVDBHeader(os);
-  //if filemane
+  // if filemane
 
   return true;
 }
