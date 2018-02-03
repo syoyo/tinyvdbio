@@ -429,7 +429,7 @@ static inline void WriteString(std::ostream &os, const std::string &name) {
   os.write(&name[0], size);
 }
 
-static inline bool ReadBool(std::istream &is) {
+static inline bool ReadMetaBool(std::istream &is) {
   char c = 0;
   unsigned int size;
   is.read(reinterpret_cast<char *>(&size), sizeof(unsigned int));
@@ -439,7 +439,7 @@ static inline bool ReadBool(std::istream &is) {
   return bool(c);
 }
 
-static inline float ReadFloat(std::istream &is) {
+static inline float ReadMetaFloat(std::istream &is) {
   float f = 0.0f;
   unsigned int size;
   is.read(reinterpret_cast<char *>(&size), sizeof(unsigned int));
@@ -450,7 +450,7 @@ static inline float ReadFloat(std::istream &is) {
   return f;
 }
 
-static inline void ReadVec3i(std::istream &is, int v[3]) {
+static inline void ReadMetaVec3i(std::istream &is, int v[3]) {
   unsigned int size;
   is.read(reinterpret_cast<char *>(&size), sizeof(unsigned int));
   if (size == 3 * sizeof(int)) {
@@ -461,7 +461,14 @@ static inline void ReadVec3i(std::istream &is, int v[3]) {
   }
 }
 
-static inline tinyvdb_int64 ReadInt64(std::istream &is) {
+static inline void ReadVec3d(std::istream &is, double v[3]) {
+  is.read(reinterpret_cast<char *>(v), 3 * sizeof(double));
+  swap8(reinterpret_cast<tinyvdb_int64*>(&v[0]));
+  swap8(reinterpret_cast<tinyvdb_int64*>(&v[1]));
+  swap8(reinterpret_cast<tinyvdb_int64*>(&v[2]));
+}
+
+static inline tinyvdb_int64 ReadMetaInt64(std::istream &is) {
   tinyvdb_int64 i64 = 0;
   unsigned int size;
   is.read(reinterpret_cast<char *>(&size), sizeof(unsigned int));
@@ -482,8 +489,17 @@ static inline bool EndsWidth(std::string const &value,
 template<typename ValueType>
 bool RootNode<ValueType>::ReadTopology(std::istream &is, const bool fromHalf)
 {
+  {
+    int buffer_count;
+    is.read(reinterpret_cast<char*>(&buffer_count), sizeof(int));
+    if (buffer_count != 1) {
+      // OPENVDB_LOG_WARN("multi-buffer trees are no longer supported");
+    }
+  }
+
   // Read background value;
-  if (fromHalf) {
+  //if (fromHalf) {
+  if (0) {
     assert(sizeof(ValueType) == 4);
 
     // Assume stored value is fp16 and `ValueType` is float
@@ -511,7 +527,6 @@ bool RootNode<ValueType>::ReadTopology(std::istream &is, const bool fromHalf)
     }
   }
 
-
   std::cout << "background : " << background_ << std::endl;
 
   unsigned int num_tiles = 0;
@@ -528,8 +543,6 @@ bool RootNode<ValueType>::ReadTopology(std::istream &is, const bool fromHalf)
   std::cout << "num_tiles " << num_tiles << std::endl;
   std::cout << "num_children " << num_children << std::endl;
 
-  return true;
-
   // Read tiles.
   for (unsigned int n = 0; n < num_tiles; n++) {
     int vec[3];
@@ -537,7 +550,24 @@ bool RootNode<ValueType>::ReadTopology(std::istream &is, const bool fromHalf)
     bool active;
 
     is.read(reinterpret_cast<char*>(vec), 3 * sizeof(int));
-    is.read(reinterpret_cast<char*>(&value), sizeof(ValueType));
+    if (0) { 
+      //if (fromHalf) {
+      // Assume stored value is fp16 and `ValueType` is float
+      unsigned short half_value = 0;
+      is.read(reinterpret_cast<char*>(&half_value), 2);
+      swap2(reinterpret_cast<unsigned short*>(&half_value));
+
+      {
+        FP16 fp16;
+        fp16.u = half_value;
+
+        FP32 fp32 = half_to_float(fp16);
+        
+        value = fp32.f;
+      }
+    } else {
+      is.read(reinterpret_cast<char*>(&value), sizeof(ValueType));
+    }
     is.read(reinterpret_cast<char*>(&active), sizeof(bool));
     swap4(&vec[0]);
     swap4(&vec[1]);
@@ -553,6 +583,8 @@ bool RootNode<ValueType>::ReadTopology(std::istream &is, const bool fromHalf)
     
     std::cout << "[" << n << "] vec = (" << vec[0] << ", " << vec[1] << ", " << vec[2] << "), value = " << value << ", active = " << active << std::endl;
   }
+
+  return true;
 
 
   // Read child nodes.
@@ -688,23 +720,23 @@ static bool ReadMeta(std::ifstream &is) {
 
     } else if (type_name.compare("vec3i") == 0) {
       int v[3];
-      ReadVec3i(is, v);
+      ReadMetaVec3i(is, v);
 
       std::cout << "  value = " << v[0] << ", " << v[1] << ", " << v[2]
                 << std::endl;
 
     } else if (type_name.compare("bool") == 0) {
-      bool b = ReadBool(is);
+      bool b = ReadMetaBool(is);
 
       std::cout << "  value = " << b << std::endl;
 
     } else if (type_name.compare("float") == 0) {
-      float f = ReadFloat(is);
+      float f = ReadMetaFloat(is);
 
       std::cout << "  value = " << f << std::endl;
 
     } else if (type_name.compare("int64") == 0) {
-      tinyvdb_int64 i64 = ReadInt64(is);
+      tinyvdb_int64 i64 = ReadMetaInt64(is);
 
       std::cout << "  value = " << i64 << std::endl;
 
@@ -756,8 +788,39 @@ static void ReadTransform(std::ifstream &is) {
   // Read the type name.
   std::string type = ReadString(is);
 
-  std::cout << "type = " << type << std::endl;
+  std::cout << "transform type = " << type << std::endl;
 
+  double scale_values[3];
+  double voxel_size[3];
+  double scale_values_inverse[3];
+  double inv_scale_squared[3];
+  double inv_twice_scale[3];
+
+  if (type.compare("UniformScaleMap") == 0) {
+    scale_values[0] = scale_values[1] = scale_values[2] = 0.0;
+    voxel_size[0] = voxel_size[1] = voxel_size[2] = 0.0;
+    scale_values_inverse[0] = scale_values_inverse[1] = scale_values_inverse[2] = 0.0;
+    inv_scale_squared[0] = inv_scale_squared[1] = inv_scale_squared[2] = 0.0;
+    inv_twice_scale[0] = inv_twice_scale[1] = inv_twice_scale[2] = 0.0;
+
+    ReadVec3d(is, scale_values);
+    ReadVec3d(is, voxel_size);
+    ReadVec3d(is, scale_values_inverse);
+    ReadVec3d(is, inv_scale_squared);
+    ReadVec3d(is, inv_twice_scale);
+
+    std::cout << "scale_values " << scale_values[0] << ", " << scale_values[1] << ", " << scale_values[2] << std::endl;
+    std::cout << "voxel_size " << voxel_size[0] << ", " << voxel_size[1] << ", " << voxel_size[2] << std::endl;
+    std::cout << "scale_value_sinverse " << scale_values_inverse[0] << ", " << scale_values_inverse[1] << ", " << scale_values_inverse[2] << std::endl;
+    std::cout << "inv_scale_squared " << inv_scale_squared[0] << ", " << inv_scale_squared[1] << ", " << inv_scale_squared[2] << std::endl;
+    std::cout << "inv_twice_scale " << inv_twice_scale[0] << ", " << inv_twice_scale[1] << ", " << inv_twice_scale[2] << std::endl;
+  } else {
+    assert(0);
+    // TODO(syoyo): Implement
+  }
+    
+
+  
   // TODO(syoyo) read transform
 }
 
