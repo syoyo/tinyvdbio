@@ -28,19 +28,21 @@
 // LIABILITY FOR ALL CLAIMS REGARDLESS OF THEIR BASIS EXCEED US$250.00.
 //
 ///////////////////////////////////////////////////////////////////////////
-#ifndef TINY_VDB_H_
-#define TINY_VDB_H_
+#ifndef TINY_VDB_IO_H_
+#define TINY_VDB_IO_H_
 
 #include <cassert>
 #include <cstring>
 #include <string>
 #include <vector>
+#include <iostream>
+#include <fstream>
 
 namespace tinyvdb {
 
 #if __cplusplus > 199711L
 // C++11
-typedef uint64_t tinvdb_uint64;
+typedef uint64_t tinyvdb_uint64;
 typedef int64_t tinyvdb_int64;
 #else
 // Although `long long` is not a standard type pre C++11, assume it is defined
@@ -57,22 +59,32 @@ typedef long long tinyvdb_int64;
 #endif
 
 // For OpenVDB code compatibility
-typedef unsigned int Index32;
-typedef tinyvdb_uint64 Index64;
-typedef int Index;
-typedef unsigned char Byte;
-typedef short Int16;
-typedef int Int32;
-typedef tinyvdb_int64 Int64;
-typedef double Real;
+typedef unsigned int int32;
+typedef tinyvdb_uint64 int64;
 
 #ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wpadded"
 #endif
 
+typedef struct
+{
+  unsigned int file_version;
+  bool has_grid_offsets;
+  bool is_compressed;
+  std::string uuid;
+} VDBHeader;
+
+typedef struct {
+
+} VDBMeta;
+
+
+// forward decl.
+class StreamReader;
+
 #if 0
-template<int Index, int Log2Dim>
+template<int int, int Log2Dim>
 class NodeMask
 {
  public:
@@ -82,14 +94,14 @@ class NodeMask
 #else
 
 /// Return the number of on bits in the given 8-bit value.
-inline Index32 CountOn(Byte v) {
+inline int32 CountOn(unsigned char v) {
 // Simple LUT:
 #ifndef _MSC_VER  // Visual C++ doesn't guarantee thread-safe initialization of
                   // local statics
   static
 #endif
       /// @todo Move this table and others into, say, Util.cc
-      const Byte numBits[256] = {
+      const unsigned char numBits[256] = {
 #define COUNTONB2(n) n, n + 1, n + 1, n + 2
 #define COUNTONB4(n) \
   COUNTONB2(n), COUNTONB2(n + 1), COUNTONB2(n + 1), COUNTONB2(n + 2)
@@ -102,7 +114,7 @@ inline Index32 CountOn(Byte v) {
 #undef COUNTONB2
 
   // Sequentially clear least significant bits
-  // Index32 c;
+  // int32 c;
   // for (c = 0; v; c++)  v &= v - 0x01U;
   // return c;
 
@@ -111,78 +123,78 @@ inline Index32 CountOn(Byte v) {
 }
 
 /// Return the number of off bits in the given 8-bit value.
-inline Index32 CountOff(Byte v) { return CountOn(static_cast<Byte>(~v)); }
+inline int32 CountOff(unsigned char v) { return CountOn(static_cast<unsigned char>(~v)); }
 
 /// Return the number of on bits in the given 32-bit value.
-inline Index32 CountOn(Index32 v) {
+inline int32 CountOn(int32 v) {
   v = v - ((v >> 1) & 0x55555555U);
   v = (v & 0x33333333U) + ((v >> 2) & 0x33333333U);
   return (((v + (v >> 4)) & 0xF0F0F0FU) * 0x1010101U) >> 24;
 }
 
 /// Return the number of off bits in the given 32-bit value.
-inline Index32 CountOff(Index32 v) { return CountOn(~v); }
+inline int32 CountOff(int32 v) { return CountOn(~v); }
 
 /// Return the number of on bits in the given 64-bit value.
-inline Index32 CountOn(Index64 v) {
+inline int32 CountOn(int64 v) {
   v = v - ((v >> 1) & 0x5555555555555555);
   v = (v & 0x3333333333333333) + ((v >> 2) & 0x3333333333333333);
-  return static_cast<Index32>(
+  return static_cast<int32>(
       (((v + (v >> 4)) & 0xF0F0F0F0F0F0F0F) * 0x101010101010101) >> 56);
 }
 
 /// Return the number of off bits in the given 64-bit value.
-inline Index32 CountOff(Index64 v) { return CountOn(~v); }
+inline int32 CountOff(int64 v) { return CountOn(~v); }
 
 /// Return the least significant on bit of the given 8-bit value.
-inline Index32 FindLowestOn(Byte v) {
+inline int32 FindLowestOn(unsigned char v) {
   assert(v);
 #ifndef _MSC_VER  // Visual C++ doesn't guarantee thread-safe initialization of
                   // local statics
   static
 #endif
-      const Byte DeBruijn[8] = {0, 1, 6, 2, 7, 5, 4, 3};
-  return DeBruijn[Byte((v & -v) * 0x1DU) >> 5];
+      const unsigned char DeBruijn[8] = {0, 1, 6, 2, 7, 5, 4, 3};
+  return DeBruijn[static_cast<unsigned char>((v & -v) * 0x1DU) >> 5];
 }
 
 /// Return the least significant on bit of the given 32-bit value.
-inline Index32 FindLowestOn(Index32 v) {
+inline int32 FindLowestOn(int32 v) {
   assert(v);
   // return ffs(v);
 #ifndef _MSC_VER  // Visual C++ doesn't guarantee thread-safe initialization of
                   // local statics
   static
 #endif
-      const Byte DeBruijn[32] = {0,  1,  28, 2,  29, 14, 24, 3,  30, 22, 20,
+      const unsigned char DeBruijn[32] = {0,  1,  28, 2,  29, 14, 24, 3,  30, 22, 20,
                                  15, 25, 17, 4,  8,  31, 27, 13, 23, 21, 19,
                                  16, 7,  26, 12, 18, 6,  11, 5,  10, 9};
-  return DeBruijn[Index32((v & -v) * 0x077CB531U) >> 27];
+  return DeBruijn[int32((v & -v) * 0x077CB531U) >> 27];
 }
 
 /// Return the least significant on bit of the given 64-bit value.
-inline Index32 FindLowestOn(Index64 v) {
+inline int32 FindLowestOn(int64 v) {
   assert(v);
   // return ffsll(v);
 #ifndef _MSC_VER  // Visual C++ doesn't guarantee thread-safe initialization of
                   // local statics
   static
 #endif
-      const Byte DeBruijn[64] = {
+      const unsigned char DeBruijn[64] = {
           0,  1,  2,  53, 3,  7,  54, 27, 4,  38, 41, 8,  34, 55, 48, 28,
           62, 5,  39, 46, 44, 42, 22, 9,  24, 35, 59, 56, 49, 18, 29, 11,
           63, 52, 6,  26, 37, 40, 33, 47, 61, 45, 43, 21, 23, 58, 17, 10,
           51, 25, 36, 32, 60, 20, 57, 16, 50, 31, 19, 15, 30, 14, 13, 12,
       };
-  return DeBruijn[Index64((v & -v) * 0x022FDD63CC95386D) >> 58];
+  return DeBruijn[int64((v & -v) * 0x022FDD63CC95386D) >> 58];
 }
 
 /// Return the most significant on bit of the given 32-bit value.
-inline Index32 FindHighestOn(Index32 v) {
+inline int32 FindHighestOn(int32 v) {
 #ifndef _MSC_VER  // Visual C++ doesn't guarantee thread-safe initialization of
                   // local statics
   static
 #endif
-      const Byte DeBruijn[32] = {0,  9,  1,  10, 13, 21, 2,  29, 11, 14, 16,
+      const unsigned char DeBruijn[32] = {0,  9,  1,  10, 13, 21, 2,  29, 11, 14, 16,
                                  18, 22, 25, 3,  30, 8,  12, 20, 28, 15, 17,
                                  24, 7,  19, 27, 23, 6,  26, 5,  4,  31};
   v |= v >> 1;  // first round down to one less than a power of 2
@@ -190,7 +202,7 @@ inline Index32 FindHighestOn(Index32 v) {
   v |= v >> 4;
   v |= v >> 8;
   v |= v >> 16;
-  return DeBruijn[Index32(v * 0x07C4ACDDU) >> 27];
+  return DeBruijn[int32(v * 0x07C4ACDDU) >> 27];
 }
 
 ////////////////////////////////////////
@@ -199,13 +211,13 @@ inline Index32 FindHighestOn(Index32 v) {
 template <typename NodeMask>
 class BaseMaskIterator {
  protected:
-  Index32 mPos;             // bit position
+  int32 mPos;             // bit position
   const NodeMask* mParent;  // this iterator can't change the parent_mask!
 
  public:
   BaseMaskIterator() : mPos(NodeMask::SIZE), mParent(NULL) {}
   // BaseMaskIterator(const BaseMaskIterator&) = default;
-  BaseMaskIterator(Index32 pos, const NodeMask* parent)
+  BaseMaskIterator(int32 pos, const NodeMask* parent)
       : mPos(pos), mParent(parent) {
     assert((parent == NULL && pos == 0) ||
            (parent != NULL && pos <= NodeMask::SIZE));
@@ -224,8 +236,8 @@ class BaseMaskIterator {
     mParent = iter.mParent;
     return *this;
   }
-  Index32 offset() const { return mPos; }
-  Index32 pos() const { return mPos; }
+  int32 offset() const { return mPos; }
+  int32 pos() const { return mPos; }
   bool test() const {
     assert(mPos <= NodeMask::SIZE);
     return (mPos != NodeMask::SIZE);
@@ -246,14 +258,14 @@ private:
     //using BaseType::mParent;//this iterator can't change the parent_mask!
 public:
     OnMaskIterator() : BaseType() {}
-    OnMaskIterator(Index32 pos,const NodeMask *parent) : BaseType(pos,parent) {}
+    OnMaskIterator(int32 pos,const NodeMask *parent) : BaseType(pos,parent) {}
     void increment()
     {
         assert(mParent != NULL);
         mPos = mParent->findNextOn(mPos+1);
         assert(mPos <= NodeMask::SIZE);
     }
-    void increment(Index n) { while(n-- && this->next()) ; }
+    void increment(int n) { while(n-- && this->next()) ; }
     bool next()
     {
         this->increment();
@@ -277,14 +289,14 @@ private:
     using BaseType::mParent;//this iterator can't change the parent_mask!
 public:
     OffMaskIterator() : BaseType()  {}
-    OffMaskIterator(Index32 pos,const NodeMask *parent) : BaseType(pos,parent) {}
+    OffMaskIterator(int32 pos,const NodeMask *parent) : BaseType(pos,parent) {}
     void increment()
     {
         assert(mParent != NULL);
         mPos=mParent->findNextOff(mPos+1);
         assert(mPos <= NodeMask::SIZE);
     }
-    void increment(Index n) { while(n-- && this->next()) ; }
+    void increment(int n) { while(n-- && this->next()) ; }
     bool next()
     {
         this->increment();
@@ -309,14 +321,14 @@ private:
 
 public:
     DenseMaskIterator() : BaseType() {}
-    DenseMaskIterator(Index32 pos,const NodeMask *parent) : BaseType(pos,parent) {}
+    DenseMaskIterator(int32 pos,const NodeMask *parent) : BaseType(pos,parent) {}
     void increment()
     {
         assert(mParent != NULL);
         mPos += 1;//careful - the increment might go beyond the end
         assert(mPos<= NodeMask::SIZE);
     }
-    void increment(Index n) { while(n-- && this->next()) ; }
+    void increment(int n) { while(n-- && this->next()) ; }
     bool next()
     {
         this->increment();
@@ -336,37 +348,37 @@ public:
 ///
 /// @note A template specialization for Log2Dim=1 and Log2Dim=2 are
 /// given below.
-// template <Index Log2Dim>
+// template <int Log2Dim>
 class NodeMask {
  public:
   // static_assert(Log2Dim > 2, "expected NodeMask template specialization, got
   // base template");
-  Index32 LOG2DIM;
-  Index32 DIM;
-  Index32 SIZE;
-  Index32 WORD_COUNT;
+  int32 LOG2DIM;
+  int32 DIM;
+  int32 SIZE;
+  int32 WORD_COUNT;
 
-  // static const Index32 LOG2DIM = Log2Dim;
-  // static const Index32 DIM = 1 << Log2Dim;
-  // static const Index32 SIZE = 1 << 3 * Log2Dim;
-  // static const Index32 WORD_COUNT = SIZE >> 6;  // 2^6=64
-  // using Word = Index64;
-  typedef Index64 Word;
+  // static const int32 LOG2DIM = Log2Dim;
+  // static const int32 DIM = 1 << Log2Dim;
+  // static const int32 SIZE = 1 << 3 * Log2Dim;
+  // static const int32 WORD_COUNT = SIZE >> 6;  // 2^6=64
+  // using Word = int64;
+  typedef int64 Word;
 
  private:
   // The bits are represented as a linear array of Words, and the
   // size of a Word is 32 or 64 bits depending on the platform.
   // The BIT_MASK is defined as the number of bits in a Word - 1
-  // static const Index32 BIT_MASK   = sizeof(void*) == 8 ? 63 : 31;
-  // static const Index32 LOG2WORD   = BIT_MASK == 63 ? 6 : 5;
-  // static const Index32 WORD_COUNT = SIZE >> LOG2WORD;
-  // using Word = boost::mpl::if_c<BIT_MASK == 63, Index64, Index32>::type;
+  // static const int32 BIT_MASK   = sizeof(void*) == 8 ? 63 : 31;
+  // static const int32 LOG2WORD   = BIT_MASK == 63 ? 6 : 5;
+  // static const int32 WORD_COUNT = SIZE >> LOG2WORD;
+  // using Word = boost::mpl::if_c<BIT_MASK == 63, int64, int32>::type;
 
   std::vector<Word> mWords;  // only member data!
 
  public:
   /// Default constructor sets all bits off
-  NodeMask(Index32 log2dim) {
+  NodeMask(int32 log2dim) {
     LOG2DIM = log2dim;
     DIM = 1 << log2dim;
     SIZE = 1 << 3 * log2dim;
@@ -377,7 +389,7 @@ class NodeMask {
     this->setOff();
   }
   /// All bits are set to the specified state
-  NodeMask(Index32 log2dim, bool on) {
+  NodeMask(int32 log2dim, bool on) {
     LOG2DIM = log2dim;
     DIM = 1 << log2dim;
     SIZE = 1 << 3 * log2dim;
@@ -393,7 +405,7 @@ class NodeMask {
   NodeMask& operator=(const NodeMask& other) {
     mWords = other.mWords;
     return *this;
-    // Index32 n = WORD_COUNT;
+    // int32 n = WORD_COUNT;
     // const Word* w2 = other.mWords;
     // for (Word *w1 = mWords; n--; ++w1, ++w2) *w1 = *w2;
   }
@@ -436,7 +448,7 @@ class NodeMask {
   const NodeMask& foreach (const NodeMask& other, const WordOp& op) {
     Word* w1 = mWords.data();
     const Word* w2 = other.mWords.data();
-    for (Index32 n = WORD_COUNT; n--; ++w1, ++w2) op(*w1, *w2);
+    for (int32 n = WORD_COUNT; n--; ++w1, ++w2) op(*w1, *w2);
     return *this;
   }
   template <typename WordOp>
@@ -444,7 +456,7 @@ class NodeMask {
                            const WordOp& op) {
     Word* w1 = mWords.data();
     const Word *w2 = other1.mWords.data(), *w3 = other2.mWords.data();
-    for (Index32 n = WORD_COUNT; n--; ++w1, ++w2, ++w3) op(*w1, *w2, *w3);
+    for (int32 n = WORD_COUNT; n--; ++w1, ++w2, ++w3) op(*w1, *w2, *w3);
     return *this;
   }
   template <typename WordOp>
@@ -453,7 +465,7 @@ class NodeMask {
     Word* w1 = mWords.data();
     const Word *w2 = other1.mWords.data(), *w3 = other2.mWords.data(),
                *w4 = other3.mWords.data();
-    for (Index32 n = WORD_COUNT; n--; ++w1, ++w2, ++w3, ++w4)
+    for (int32 n = WORD_COUNT; n--; ++w1, ++w2, ++w3, ++w4)
       op(*w1, *w2, *w3, *w4);
     return *this;
   }
@@ -461,28 +473,28 @@ class NodeMask {
   const NodeMask& operator&=(const NodeMask& other) {
     Word* w1 = mWords.data();
     const Word* w2 = other.mWords.data();
-    for (Index32 n = WORD_COUNT; n--; ++w1, ++w2) *w1 &= *w2;
+    for (int32 n = WORD_COUNT; n--; ++w1, ++w2) *w1 &= *w2;
     return *this;
   }
   /// @brief Bitwise union
   const NodeMask& operator|=(const NodeMask& other) {
     Word* w1 = mWords.data();
     const Word* w2 = other.mWords.data();
-    for (Index32 n = WORD_COUNT; n--; ++w1, ++w2) *w1 |= *w2;
+    for (int32 n = WORD_COUNT; n--; ++w1, ++w2) *w1 |= *w2;
     return *this;
   }
   /// @brief Bitwise difference
   const NodeMask& operator-=(const NodeMask& other) {
     Word* w1 = mWords.data();
     const Word* w2 = other.mWords.data();
-    for (Index32 n = WORD_COUNT; n--; ++w1, ++w2) *w1 &= ~*w2;
+    for (int32 n = WORD_COUNT; n--; ++w1, ++w2) *w1 &= ~*w2;
     return *this;
   }
   /// @brief Bitwise XOR
   const NodeMask& operator^=(const NodeMask& other) {
     Word* w1 = mWords.data();
     const Word* w2 = other.mWords.data();
-    for (Index32 n = WORD_COUNT; n--; ++w1, ++w2) *w1 ^= *w2;
+    for (int32 n = WORD_COUNT; n--; ++w1, ++w2) *w1 ^= *w2;
     return *this;
   }
   NodeMask operator!() const {
@@ -507,53 +519,53 @@ class NodeMask {
   }
 
   /// Return the byte size of this NodeMask
-  Index32 memUsage() const {
-    return static_cast<Index32>(WORD_COUNT * sizeof(Word));
+  int32 memUsage() const {
+    return static_cast<int32>(WORD_COUNT * sizeof(Word));
   }
   /// Return the total number of on bits
-  Index32 countOn() const {
-    Index32 sum = 0, n = WORD_COUNT;
+  int32 countOn() const {
+    int32 sum = 0, n = WORD_COUNT;
     for (const Word* w = mWords.data(); n--; ++w) sum += CountOn(*w);
     return sum;
   }
   /// Return the total number of on bits
-  Index32 countOff() const { return SIZE - this->countOn(); }
+  int32 countOff() const { return SIZE - this->countOn(); }
   /// Set the <i>n</i>th  bit on
-  void setOn(Index32 n) {
+  void setOn(int32 n) {
     assert((n >> 6) < WORD_COUNT);
     mWords[n >> 6] |= Word(1) << (n & 63);
   }
   /// Set the <i>n</i>th bit off
-  void setOff(Index32 n) {
+  void setOff(int32 n) {
     assert((n >> 6) < WORD_COUNT);
     mWords[n >> 6] &= ~(Word(1) << (n & 63));
   }
   /// Set the <i>n</i>th bit to the specified state
-  void set(Index32 n, bool On) { On ? this->setOn(n) : this->setOff(n); }
+  void set(int32 n, bool On) { On ? this->setOn(n) : this->setOff(n); }
   /// Set all bits to the specified state
   void set(bool on) {
     const Word state = on ? ~Word(0) : Word(0);
-    Index32 n = WORD_COUNT;
+    int32 n = WORD_COUNT;
     for (Word* w = mWords.data(); n--; ++w) *w = state;
   }
   /// Set all bits on
   void setOn() {
-    Index32 n = WORD_COUNT;
+    int32 n = WORD_COUNT;
     for (Word* w = mWords.data(); n--; ++w) *w = ~Word(0);
   }
   /// Set all bits off
   void setOff() {
-    Index32 n = WORD_COUNT;
+    int32 n = WORD_COUNT;
     for (Word* w = mWords.data(); n--; ++w) *w = Word(0);
   }
   /// Toggle the state of the <i>n</i>th bit
-  void toggle(Index32 n) {
+  void toggle(int32 n) {
     assert((n >> 6) < WORD_COUNT);
     mWords[n >> 6] ^= Word(1) << (n & 63);
   }
   /// Toggle the state of all bits in the mask
   void toggle() {
-    Index32 n = WORD_COUNT;
+    int32 n = WORD_COUNT;
     for (Word* w = mWords.data(); n--; ++w) *w = ~*w;
   }
   /// Set the first bit on
@@ -565,12 +577,12 @@ class NodeMask {
   /// Set the last bit off
   void setLastOff() { this->setOff(SIZE - 1); }
   /// Return @c true if the <i>n</i>th bit is on
-  bool isOn(Index32 n) const {
+  bool isOn(int32 n) const {
     assert((n >> 6) < WORD_COUNT);
     return 0 != (mWords[n >> 6] & (Word(1) << (n & 63)));
   }
   /// Return @c true if the <i>n</i>th bit is off
-  bool isOff(Index32 n) const { return !this->isOn(n); }
+  bool isOff(int32 n) const { return !this->isOn(n); }
   /// Return @c true if all the bits are on
   bool isOn() const {
     int n = int(WORD_COUNT);
@@ -595,15 +607,15 @@ class NodeMask {
     while (w < n && *w == mWords[0]) ++w;
     return w == n;
   }
-  Index32 findFirstOn() const {
-    Index32 n = 0;
+  int32 findFirstOn() const {
+    int32 n = 0;
     const Word* w = mWords.data();
     for (; n < WORD_COUNT && !*w; ++w, ++n)
       ;
     return n == WORD_COUNT ? SIZE : (n << 6) + FindLowestOn(*w);
   }
-  Index32 findFirstOff() const {
-    Index32 n = 0;
+  int32 findFirstOff() const {
+    int32 n = 0;
     const Word* w = mWords.data();
     for (; n < WORD_COUNT && !~*w; ++w, ++n)
       ;
@@ -613,12 +625,12 @@ class NodeMask {
   //@{
   /// Return the <i>n</i>th word of the bit mask, for a word of arbitrary size.
   template <typename WordT>
-  WordT getWord(Index n) const {
+  WordT getWord(int n) const {
     assert(n * 8 * sizeof(WordT) < SIZE);
     return reinterpret_cast<const WordT*>(mWords)[n];
   }
   template <typename WordT>
-  WordT& getWord(Index n) {
+  WordT& getWord(int n) {
     assert(n * 8 * sizeof(WordT) < SIZE);
     return reinterpret_cast<WordT*>(mWords)[n];
   }
@@ -627,8 +639,10 @@ class NodeMask {
   void save(std::ostream& os) const {
     os.write(reinterpret_cast<const char*>(mWords.data()), this->memUsage());
   }
-  void load(std::istream& is) {
-    is.read(reinterpret_cast<char*>(mWords.data()), this->memUsage());
+  void load(StreamReader *sr) {
+    (void)sr;
+    //sr->read(this->memUsage(), this->memUsage(), reinterpret_cast<char*>(mWords.data()));
+    return;
   }
   void seek(std::istream& is) const {
     is.seekg(this->memUsage(), std::ios_base::cur);
@@ -638,9 +652,9 @@ class NodeMask {
     os << "NodeMask: Dim=" << DIM << " Log2Dim=" << LOG2DIM
        << " Bit count=" << SIZE << " word count=" << WORD_COUNT << std::endl;
   }
-  void printBits(std::ostream& os = std::cout, Index32 max_out = 80u) const {
-    const Index32 n = (SIZE > max_out ? max_out : SIZE);
-    for (Index32 i = 0; i < n; ++i) {
+  void printBits(std::ostream& os = std::cout, int32 max_out = 80u) const {
+    const int32 n = (SIZE > max_out ? max_out : SIZE);
+    for (int32 i = 0; i < n; ++i) {
       if (!(i & 63))
         os << "||";
       else if (!(i % 8))
@@ -649,15 +663,15 @@ class NodeMask {
     }
     os << "|" << std::endl;
   }
-  void printAll(std::ostream& os = std::cout, Index32 max_out = 80u) const {
+  void printAll(std::ostream& os = std::cout, int32 max_out = 80u) const {
     this->printInfo(os);
     this->printBits(os, max_out);
   }
 
-  Index32 findNextOn(Index32 start) const {
-    Index32 n = start >> 6;            // initiate
+  int32 findNextOn(int32 start) const {
+    int32 n = start >> 6;            // initiate
     if (n >= WORD_COUNT) return SIZE;  // check for out of bounds
-    Index32 m = start & 63;
+    int32 m = start & 63;
     Word b = mWords[n];
     if (b & (Word(1) << m)) return start;          // simpel case: start is on
     b &= ~Word(0) << m;                            // mask out lower bits
@@ -665,10 +679,10 @@ class NodeMask {
     return (!b ? SIZE : (n << 6) + FindLowestOn(b));  // catch last word=0
   }
 
-  Index32 findNextOff(Index32 start) const {
-    Index32 n = start >> 6;            // initiate
+  int32 findNextOff(int32 start) const {
+    int32 n = start >> 6;            // initiate
     if (n >= WORD_COUNT) return SIZE;  // check for out of bounds
-    Index32 m = start & 63;
+    int32 m = start & 63;
     Word b = ~mWords[n];
     if (b & (Word(1) << m)) return start;           // simpel case: start is on
     b &= ~Word(0) << m;                             // mask out lower bits
@@ -686,7 +700,7 @@ class GridDescriptor {
                  bool save_float_as_half = false);
   // GridDescriptor(const GridDescriptor &rhs);
   // GridDescriptor& operator=(const GridDescriptor &rhs);
-  ~GridDescriptor();
+  //~GridDescriptor();
 
   const std::string &GridName() const { return grid_name_; }
 
@@ -706,7 +720,7 @@ class GridDescriptor {
   ///
   /// Read GridDescriptor from a stream.
   ///
-  bool Read(std::ifstream &is, const unsigned int file_version,
+  bool Read(StreamReader *sr, const unsigned int file_version,
             std::string *err);
 
  private:
@@ -733,7 +747,8 @@ typedef enum {
   VALUE_TYPE_HALF = 2,
   VALUE_TYPE_BOOL = 3,
   VALUE_TYPE_DOUBLE = 4,
-  VALUE_TYPE_INT = 5
+  VALUE_TYPE_INT = 5,
+  VALUE_TYPE_STRING = 6
 } ValueType;
 
 static size_t GetValueTypeSize(const ValueType type) {
@@ -745,6 +760,10 @@ static size_t GetValueTypeSize(const ValueType type) {
     return 1;
   } else if (type == VALUE_TYPE_DOUBLE) {
     return sizeof(double);
+  } else if (type == VALUE_TYPE_STRING) {
+    // string is not supported in this function.
+    // Use Value::Size() instead.
+    return 0;
   }
   return 0;
 }
@@ -758,6 +777,7 @@ class Value {
   explicit Value(float f) : type_(VALUE_TYPE_FLOAT) { float_value_ = f; }
   explicit Value(double d) : type_(VALUE_TYPE_DOUBLE) { double_value_ = d; }
   explicit Value(int n) : type_(VALUE_TYPE_INT) { int_value_ = n; }
+  explicit Value(const std::string &str) : type_(VALUE_TYPE_STRING) { string_value_ = str; }
 
   ValueType Type() const { return type_; }
 
@@ -765,6 +785,7 @@ class Value {
   bool IsFloat() const { return (type_ == VALUE_TYPE_FLOAT); }
   bool IsDouble() const { return (type_ == VALUE_TYPE_DOUBLE); }
   bool IsInt() const { return (type_ == VALUE_TYPE_INT); }
+  bool IsString() const { return (type_ == VALUE_TYPE_STRING); }
 
   // Accessor
   template <typename T>
@@ -790,6 +811,9 @@ class Value {
       case VALUE_TYPE_DOUBLE:
         len = sizeof(double);
         break;
+      case VALUE_TYPE_STRING:
+        len = string_value_.size();
+        break;
       case VALUE_TYPE_NULL:
         len = 0;
         break;
@@ -805,6 +829,7 @@ class Value {
   float float_value_;
   double double_value_;
   bool boolean_value_;
+  std::string string_value_;
 };
 
 #define TINYVDB_VALUE_GET(ctype, var)             \
@@ -820,6 +845,7 @@ TINYVDB_VALUE_GET(bool, boolean_value_)
 TINYVDB_VALUE_GET(double, double_value_)
 TINYVDB_VALUE_GET(int, int_value_)
 TINYVDB_VALUE_GET(float, float_value_)
+TINYVDB_VALUE_GET(std::string, string_value_)
 #undef TINYVDB_VALUE_GET
 
 static std::ostream &operator<<(std::ostream &os, const Value &value) {
@@ -840,19 +866,19 @@ static std::ostream &operator<<(std::ostream &os, const Value &value) {
 
 class NodeInfo {
  public:
-  NodeInfo(NodeType node_type, ValueType value_type, Index32 log2dim)
+  NodeInfo(NodeType node_type, ValueType value_type, int32 log2dim)
       : node_type_(node_type), value_type_(value_type), log2dim_(log2dim) {}
 
   NodeType node_type() const { return node_type_; }
 
   ValueType value_type() const { return value_type_; }
 
-  Index32 log2dim() const { return log2dim_; }
+  int32 log2dim() const { return log2dim_; }
 
  private:
   NodeType node_type_;
   ValueType value_type_;
-  Index32 log2dim_;
+  int32 log2dim_;
 };
 
 class InternalNode;
@@ -889,7 +915,7 @@ class Node {
   Node(NodeInfo node_info) : node_info_(node_info) {}
   virtual ~Node();
 
-  virtual bool ReadTopology(std::istream &is, const bool fromHalf,
+  virtual bool ReadTopology(StreamReader *sr, const bool half_precision,
                             const unsigned int file_version) = 0;
 
  protected:
@@ -903,7 +929,7 @@ class LeafNode : public Node {
   LeafNode(const NodeInfo node_info) : Node(node_info) {}
   ~LeafNode();
 
-  bool ReadTopology(std::istream &is, const bool fromHalf,
+  bool ReadTopology(StreamReader *sr, const bool half_precision,
                     const unsigned int file_version);
 
  private:
@@ -911,10 +937,10 @@ class LeafNode : public Node {
 
 LeafNode::~LeafNode() {}
 
-bool LeafNode::ReadTopology(std::istream &is, const bool fromHalf,
+bool LeafNode::ReadTopology(StreamReader *sr, const bool half_precision,
                             const unsigned int file_version) {
-  (void)is;
-  (void)fromHalf;
+  (void)sr;
+  (void)half_precision;
   (void)file_version;
 
   return false;
@@ -925,7 +951,7 @@ bool LeafNode::ReadTopology(std::istream &is, const bool fromHalf,
 ///
 class InternalNode : public Node {
  public:
-  // static const Index LOG2DIM = Log2Dim,  // log2 of tile count in one
+  // static const int LOG2DIM = Log2Dim,  // log2 of tile count in one
   // dimension
   //    TOTAL = Log2Dim +
   //            ChildNodeType::TOTAL,  // log2 of voxel count in one dimension
@@ -933,10 +959,10 @@ class InternalNode : public Node {
   //    NUM_VALUES =
   //        1 << (3 * Log2Dim),  // total voxel count represented by this node
   //    LEVEL = 1 + ChildNodeType::LEVEL;  // level 0 = leaf
-  // static const Index64 NUM_VOXELS =
+  // static const int64 NUM_VOXELS =
   //    uint64_t(1) << (3 * TOTAL);  // total voxel count represented by this
   //    node
-  // static const Index NUM_VALUES = 1 << (3 * Log2Dim); // total voxel count
+  // static const int NUM_VALUES = 1 << (3 * Log2Dim); // total voxel count
   // represented by this node
 
   InternalNode(NodeInfo node_info, Node *child_node)
@@ -950,7 +976,7 @@ class InternalNode : public Node {
   }
   ~InternalNode() {}
 
-  bool ReadTopology(std::istream &is, const bool from_half,
+  bool ReadTopology(StreamReader *sr, const bool half_precision,
                     const unsigned int file_version);
 
  private:
@@ -971,7 +997,7 @@ class RootNode : public Node {
       : Node(node_info), child_node_(child_node) {}
   ~RootNode() {}
 
-  bool ReadTopology(std::istream &is, const bool fromHalf,
+  bool ReadTopology(StreamReader *sr, const bool half_precision,
                     const unsigned int file_version);
 
  private:
@@ -1018,10 +1044,10 @@ bool SaveVDB(const std::string &filename, std::string *err);
 
 }  // namespace tinyvdb
 
-#ifdef TINYVDB_IMPLEMENTATION
+#ifdef TINYVDBIO_IMPLEMENTATION
 
 #include <cassert>
-#include <iostream>
+#include <iostream> // HACK
 #include <map>
 #include <sstream>
 #include <vector>
@@ -1038,6 +1064,7 @@ const int kOPENVDB_MAGIC = 0x56444220;
 ///
 const unsigned int kTINYVDB_FILE_VERSION = 222;
 
+// TODO(syoyo) Rewrite with TINYVDB_...
 /// Notable file format version numbers
 enum {
   OPENVDB_FILE_VERSION_ROOTNODE_MAP = 213,
@@ -1258,39 +1285,271 @@ static inline void swap8(tinyvdb::tinyvdb_int64 *val) {
 #endif
 }
 
-static Value ReadValue(std::istream &is, const ValueType type) {
+///
+/// Simple stream reder
+///
+class StreamReader {
+ public:
+  explicit StreamReader(const uint8_t* binary, const size_t length,
+                        const bool swap_endian)
+      : binary_(binary), length_(length), swap_endian_(swap_endian), idx_(0) {
+    (void)pad_;
+  }
+
+  bool seek_set(const uint64_t offset) {
+    if (offset > length_) {
+      return false;
+    }
+
+    idx_ = offset;
+    return true;
+  }
+
+  bool seek_from_currect(const int64_t offset) {
+    if ((int64_t(idx_) + offset) < 0) {
+      return false;
+    }
+
+    if (size_t((int64_t(idx_) + offset)) > length_) {
+      return false;
+    }
+
+    idx_ = size_t(int64_t(idx_) + offset);
+    return true;
+  }
+
+  size_t read(const size_t n, const uint64_t dst_len, unsigned char* dst) {
+    size_t len = n;
+    if ((idx_ + len) > length_) {
+      len = length_ - idx_;
+    }
+
+    if (len > 0) {
+      if (dst_len < len) {
+        // dst does not have enough space. return 0 for a while.
+        return 0;
+      }
+
+      memcpy(dst, &binary_[idx_], len);
+      return len;
+
+    } else {
+      return 0;
+    }
+  }
+
+  bool read1(unsigned char* ret) {
+    if ((idx_ + 1) > length_) {
+      return false;
+    }
+
+    const unsigned char val = binary_[idx_];
+
+    (*ret) = val;
+    idx_ += 1;
+
+    return true;
+  }
+
+  bool read_bool(bool* ret) {
+    if ((idx_ + 1) > length_) {
+      return false;
+    }
+
+    const char val = static_cast<const char>(binary_[idx_]);
+
+    (*ret) = bool(val);
+    idx_ += 1;
+
+    return true;
+  }
+
+  bool read1(char* ret) {
+    if ((idx_ + 1) > length_) {
+      return false;
+    }
+
+    const char val = static_cast<const char>(binary_[idx_]);
+
+    (*ret) = val;
+    idx_ += 1;
+
+    return true;
+  }
+
+  bool read2(unsigned short* ret) {
+    if ((idx_ + 2) > length_) {
+      return false;
+    }
+
+    unsigned short val =
+        *(reinterpret_cast<const unsigned short*>(&binary_[idx_]));
+
+    if (swap_endian_) {
+      swap2(&val);
+    }
+
+    (*ret) = val;
+    idx_ += 2;
+
+    return true;
+  }
+
+  bool read4(unsigned int* ret) {
+    if ((idx_ + 4) > length_) {
+      return false;
+    }
+
+    unsigned int val = *(reinterpret_cast<const unsigned int*>(&binary_[idx_]));
+
+    if (swap_endian_) {
+      swap4(&val);
+    }
+
+    (*ret) = val;
+    idx_ += 4;
+
+    return true;
+  }
+
+  bool read4(int* ret) {
+    if ((idx_ + 4) > length_) {
+      return false;
+    }
+
+    int val = *(reinterpret_cast<const int*>(&binary_[idx_]));
+
+    if (swap_endian_) {
+      swap4(&val);
+    }
+
+    (*ret) = val;
+    idx_ += 4;
+
+    return true;
+  }
+
+  bool read8(tinyvdb_uint64 *ret) {
+    if ((idx_ + 8) > length_) {
+      return false;
+    }
+
+    tinyvdb_uint64 val = *(reinterpret_cast<const tinyvdb_uint64*>(&binary_[idx_]));
+
+    if (swap_endian_) {
+      swap8(&val);
+    }
+
+    (*ret) = val;
+    idx_ += 8;
+
+    return true;
+  }
+
+  bool read_float(float* ret) {
+
+    if (!ret) {
+      return false;
+    }
+
+    float value;
+    if (!read4(reinterpret_cast<int*>(&value))) {
+      return false;
+    }
+
+    return true;
+  }
+
+  bool read8(tinyvdb_int64 *ret) {
+    if ((idx_ + 8) > length_) {
+      return false;
+    }
+
+    tinyvdb_int64 val = *(reinterpret_cast<const tinyvdb_int64*>(&binary_[idx_]));
+
+    if (swap_endian_) {
+      swap8(&val);
+    }
+
+    (*ret) = val;
+    idx_ += 8;
+
+    return true;
+  }
+
+  bool read_double(double* ret) {
+
+    if (!ret) {
+      return false;
+    }
+
+    double value;
+    if (!read8(reinterpret_cast<tinyvdb_uint64*>(&value))) {
+      return false;
+    }
+
+    return true;
+  }
+
+  size_t tell() const { return idx_; }
+
+  const uint8_t* data() const { return binary_; }
+
+  bool swap_endian() const { return swap_endian_; }
+
+  size_t size() const { return length_; }
+
+ private:
+  const uint8_t* binary_;
+  const size_t length_;
+  bool swap_endian_;
+  char pad_[7];
+  uint64_t idx_;
+};
+
+static Value ReadValue(StreamReader *sr, const ValueType type) {
   if (type == VALUE_TYPE_NULL) {
     return Value();
   } else if (type == VALUE_TYPE_BOOL) {
     char value;
-    is.read(&value, 1);
+    sr->read1(&value);
     return Value(value);
   } else if (type == VALUE_TYPE_FLOAT) {
     float value;
-    is.read(reinterpret_cast<char *>(&value), sizeof(float));
-    swap4(reinterpret_cast<int *>(&value));
+    sr->read_float(&value);
     return Value(value);
   } else if (type == VALUE_TYPE_INT) {
     int value;
-    is.read(reinterpret_cast<char *>(&value), sizeof(int));
-    swap4(&value);
+    sr->read4(&value);
     return Value(value);
   } else if (type == VALUE_TYPE_DOUBLE) {
     double value;
-    is.read(reinterpret_cast<char *>(&value), sizeof(double));
-    swap8(reinterpret_cast<tinyvdb_int64 *>(&value));
+    sr->read_double(&value);
     return Value(value);
   }
   // ???
   return Value();
 }
 
+#if 0 // remove
 static inline std::string ReadString(std::istream &is) {
   unsigned int size;
   is.read(reinterpret_cast<char *>(&size), sizeof(unsigned int));
   std::string buffer(size, ' ');
   if (size > 0) is.read(&buffer[0], size);
   return buffer;
+}
+#endif
+
+static inline std::string ReadString(StreamReader *sr) {
+  unsigned int size = 0;
+  sr->read4(&size);
+  if (size > 0) {
+    std::string buffer(size, ' ');
+    sr->read(size, size, reinterpret_cast<unsigned char*>(&buffer[0]));
+    return buffer;
+  }
+  return std::string();
 }
 
 static inline void WriteString(std::ostream &os, const std::string &name) {
@@ -1299,52 +1558,48 @@ static inline void WriteString(std::ostream &os, const std::string &name) {
   os.write(&name[0], size);
 }
 
-static inline bool ReadMetaBool(std::istream &is) {
+static inline bool ReadMetaBool(StreamReader *sr) {
   char c = 0;
   unsigned int size;
-  is.read(reinterpret_cast<char *>(&size), sizeof(unsigned int));
+  sr->read4(&size);
   if (size == 1) {
-    is.read(&c, 1);
+    sr->read(1, 1, reinterpret_cast<unsigned char*>(&c));
   }
   return bool(c);
 }
 
-static inline float ReadMetaFloat(std::istream &is) {
+static inline float ReadMetaFloat(StreamReader *sr) {
   float f = 0.0f;
   unsigned int size;
-  is.read(reinterpret_cast<char *>(&size), sizeof(unsigned int));
+  sr->read4(&size);
   if (size == sizeof(float)) {
-    is.read(reinterpret_cast<char *>(&f), sizeof(float));
-    swap4(reinterpret_cast<unsigned int *>(&f));
+    sr->read4(reinterpret_cast<unsigned int *>(&f));
   }
   return f;
 }
 
-static inline void ReadMetaVec3i(std::istream &is, int v[3]) {
+static inline void ReadMetaVec3i(StreamReader *sr, int v[3]) {
   unsigned int size;
-  is.read(reinterpret_cast<char *>(&size), sizeof(unsigned int));
+  sr->read4(&size);
   if (size == 3 * sizeof(int)) {
-    is.read(reinterpret_cast<char *>(v), 3 * sizeof(int));
-    swap4(&v[0]);
-    swap4(&v[1]);
-    swap4(&v[2]);
+    sr->read4(&v[0]);
+    sr->read4(&v[1]);
+    sr->read4(&v[2]);
   }
 }
 
-static inline void ReadVec3d(std::istream &is, double v[3]) {
-  is.read(reinterpret_cast<char *>(v), 3 * sizeof(double));
-  swap8(reinterpret_cast<tinyvdb_int64 *>(&v[0]));
-  swap8(reinterpret_cast<tinyvdb_int64 *>(&v[1]));
-  swap8(reinterpret_cast<tinyvdb_int64 *>(&v[2]));
+static inline void ReadVec3d(StreamReader *sr, double v[3]) {
+  sr->read_double(&v[0]);
+  sr->read_double(&v[1]);
+  sr->read_double(&v[2]);
 }
 
-static inline tinyvdb_int64 ReadMetaInt64(std::istream &is) {
+static inline tinyvdb_int64 ReadMetaInt64(StreamReader *sr) {
   tinyvdb_int64 i64 = 0;
   unsigned int size;
-  is.read(reinterpret_cast<char *>(&size), sizeof(unsigned int));
-  if (size == 8) {
-    is.read(reinterpret_cast<char *>(&i64), 8);
-    swap8(&i64);
+  sr->read4(&size);
+  if (size == 4) {
+    sr->read8(reinterpret_cast<tinyvdb_uint64 *>(&i64));
   }
   return i64;
 }
@@ -1356,27 +1611,25 @@ static inline bool EndsWidth(std::string const &value,
   return std::equal(ending.rbegin(), ending.rend(), value.rbegin());
 }
 
-bool RootNode::ReadTopology(std::istream &is, const bool from_half,
+bool RootNode::ReadTopology(StreamReader *sr, const bool half_precision,
                             const unsigned int file_version) {
   {
     int buffer_count;
-    is.read(reinterpret_cast<char *>(&buffer_count), sizeof(int));
+    sr->read4(&buffer_count);
     if (buffer_count != 1) {
       // OPENVDB_LOG_WARN("multi-buffer trees are no longer supported");
     }
   }
 
   // Read background value;
-  background_ = ReadValue(is, node_info_.value_type());
+  background_ = ReadValue(sr, node_info_.value_type());
 
   std::cout << "background : " << background_ << std::endl;
 
   unsigned int num_tiles = 0;
   unsigned int num_children = 0;
-  is.read(reinterpret_cast<char *>(&num_tiles), sizeof(unsigned int));
-  swap4(&num_tiles);
-  is.read(reinterpret_cast<char *>(&num_children), sizeof(unsigned int));
-  swap4(&num_children);
+  sr->read4(&num_tiles);
+  sr->read4(&num_children);
 
   if ((num_tiles == 0) && (num_children == 0)) {
     return false;
@@ -1391,12 +1644,11 @@ bool RootNode::ReadTopology(std::istream &is, const bool from_half,
     Value value;
     bool active;
 
-    is.read(reinterpret_cast<char *>(vec), 3 * sizeof(int));
-    value = ReadValue(is, node_info_.value_type());
-    is.read(reinterpret_cast<char *>(&active), sizeof(bool));
-    swap4(&vec[0]);
-    swap4(&vec[1]);
-    swap4(&vec[2]);
+    sr->read4(&vec[0]);
+    sr->read4(&vec[1]);
+    sr->read4(&vec[2]);
+    value = ReadValue(sr, node_info_.value_type());
+    sr->read_bool(&active);
 
     std::cout << "[" << n << "] vec = (" << vec[0] << ", " << vec[1] << ", "
               << vec[2] << "), value = " << value << ", active = " << active
@@ -1406,13 +1658,11 @@ bool RootNode::ReadTopology(std::istream &is, const bool from_half,
   // Read child nodes.
   for (unsigned int n = 0; n < num_children; n++) {
     int vec[3];
-    is.read(reinterpret_cast<char *>(vec), 3 * sizeof(int));
+    sr->read4(&vec[0]);
+    sr->read4(&vec[1]);
+    sr->read4(&vec[2]);
 
-    swap4(&vec[0]);
-    swap4(&vec[1]);
-    swap4(&vec[2]);
-
-    child_node_->ReadTopology(is, from_half, file_version);
+    child_node_->ReadTopology(sr, half_precision, file_version);
 
 #if 0  // TODO
     //mTable[Coord(vec)] = NodeStruct(*child);
@@ -1424,77 +1674,152 @@ bool RootNode::ReadTopology(std::istream &is, const bool from_half,
   return true;
 }
 
-bool ReadCompressedValues(std::istream &is,
+static bool ReadCompressedData(StreamReader *sr, unsigned char *dst_data,
+                        size_t element_size, size_t count,
+                        unsigned int compression_mask) {
+  if (compression_mask & COMPRESS_BLOSC) {
+    // TODO(syoyo):
+    assert(0);
+    return false;
+  } else if (compression_mask & COMPRESS_ZIP) {
+    // TODO(syoyo):
+    assert(0);
+    return false;
+  } else {
+    sr->read(element_size * count, element_size * count, dst_data);
+    if (element_size == 2) {
+      unsigned short *ptr = reinterpret_cast<unsigned short*>(dst_data);
+      for (size_t i = 0; i < count; i++) {
+        swap2(ptr + i);
+      }
+    } else if (element_size == 4) {
+      unsigned int *ptr = reinterpret_cast<unsigned int*>(dst_data);
+      for (size_t i = 0; i < count; i++) {
+        swap4(ptr + i);
+      }
+    } else if (element_size == 8) {
+      tinyvdb_uint64 *ptr = reinterpret_cast<tinyvdb_uint64*>(dst_data);
+      for (size_t i = 0; i < count; i++) {
+        swap8(ptr + i);
+      }
+    }
+    return true;
+  }
+}
+
+static bool ReadCompressedValues(
+  StreamReader *sr,
   const unsigned int compression_flags,
   const int file_version,
   size_t num_values,
   ValueType value_type,
   NodeMask value_mask,
-  const bool from_half,
+  const bool half_precision,
+  const Value &background,
   std::vector<unsigned char> *values)
 {
   const bool mask_compressed = compression_flags & COMPRESS_ACTIVE_MASK;
 
   char metadata = 0;
-    if (file_version >= OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
-        // Read the flag that specifies what, if any, additional metadata
-        // (selection mask and/or inactive value(s)) is saved.
-        if ((!values) && !mask_compressed) {
-            is.seekg(/*bytes=*/1, std::ios_base::cur);
-        } else {
-            is.read(reinterpret_cast<char*>(&metadata), /*bytes=*/1);
-        }
-    }
+  if (file_version >= OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
+    sr->read1(&metadata);
+  }
 
+  // support 1(ZIP) or 2(ACTVE_MASK)
+  if ((compression_flags & COMPRESS_ZIP) ||
+      (compression_flags & COMPRESS_ACTIVE_MASK)) {
+    // ok
+  } else {
+    return false;
+  }
+
+  // resize buffer
+  std::vector<unsigned char> buf;
+
+  (void)num_values;
+  (void)mask_compressed;
+  (void)value_type;
+  (void)value_mask;
+  (void)half_precision;
+  (void)background;
+  (void)values;
+#if 0 // TODO
+  if (half_precision) {
+    ReadCompressedData(sr, buf.data(), sizeof(short), num_values, compression_flags);
+    // fp16 -> fp32
+    {
+      const unsigned short *fp16_ptr = src_values.data();
+      for (size_t i = 0; i < num_values; i++) {
+        FP16 fp16;
+        fp16.u = fp16_ptr[i];
+
+        FP32 fp32 = half_to_float(fp16);
+        src_data
+      }
+    }
+  } else {
+    ReadCompressedData(sr, values, GetValueTypeSize(value_type), num_values,
+                       compression_flags);
+  }
+
+  if (compression_flags & COMPRESS_ACTIVE_MASK) {
+    // Decompress mask.
+  }
+#endif
 
   return false;
 }
 
-bool InternalNode::ReadTopology(std::istream &is, const bool from_half,
+bool InternalNode::ReadTopology(StreamReader *sr, const bool half_precision,
                                 const unsigned int file_version) {
-  (void)from_half;
+  (void)half_precision;
   (void)file_version;
   (void)child_node_;
 
   {
     int buffer_count;
-    is.read(reinterpret_cast<char *>(&buffer_count), sizeof(int));
+    sr->read4(&buffer_count);
     if (buffer_count != 1) {
       // OPENVDB_LOG_WARN("multi-buffer trees are no longer supported");
     }
   }
 
-  child_mask_.load(is);
-  value_mask_.load(is);
+  child_mask_.load(sr);
+  value_mask_.load(sr);
 
   const bool old_version =
       file_version < OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION;
 
-  Index NUM_VALUES = 1 << (3 * node_info_.log2dim());  // total voxel count represented by this node
+  int NUM_VALUES =
+      1 << (3 * node_info_
+                    .log2dim());  // total voxel count represented by this node
 
-  const Index num_values = (old_version ? Index(child_mask_.countOff()) : NUM_VALUES);
+  const int num_values =
+      (old_version ? int(child_mask_.countOff()) : NUM_VALUES);
 
   {
-      // Read in (and uncompress, if necessary) all of this node's values
-      // into a contiguous array.
-      //std::unique_ptr<ValueType[]> valuePtr(new ValueType[numValues]);
-      //ValueType* values = valuePtr.get();
-      std::vector<unsigned char> values;
-      values.resize(GetValueTypeSize(node_info_.value_type()) * size_t(num_values));
-      ReadCompressedValues(is, num_values, value_type, value_mask_, from_half, &values);
+    std::vector<unsigned char> values;
+    values.resize(GetValueTypeSize(node_info_.value_type()) *
+                  size_t(num_values));
+#if 0 // TODO
+    if (!ReadCompressedValues(is, num_values, node_info_.value_type(), value_mask_, half_precision,
+                         &values)) {
+      return false;
+    }
 
-      // Copy values from the array into this node's table.
-      if (old_version) {
-          //Index n = 0;
-          //for (ValueAllIter iter = this->beginValueAll(); iter; ++iter) {
-          //    mNodes[iter.pos()].setValue(values[n++]);
-          //}
-          //assert(n == numValues);
-      } else {
-          //for (ValueAllIter iter = this->beginValueAll(); iter; ++iter) {
-          //    mNodes[iter.pos()].setValue(values[iter.pos()]);
-          //}
-      }
+    // Copy values from the array into this node's table.
+    if (old_version) {
+      // int n = 0;
+      // for (ValueAllIter iter = this->beginValueAll(); iter; ++iter) {
+      //    mNodes[iter.pos()].setValue(values[n++]);
+      //}
+      // assert(n == numValues);
+    } else {
+      // for (ValueAllIter iter = this->beginValueAll(); iter; ++iter) {
+      //    mNodes[iter.pos()].setValue(values[iter.pos()]);
+      //}
+    }
+#endif
   }
 
 #if 0
@@ -1502,20 +1827,12 @@ bool InternalNode::ReadTopology(std::istream &is, const bool from_half,
   for (ChildOnIter iter = this->beginChildOn(); iter; ++iter) {
       ChildNodeType* child = new ChildNodeType(PartialCreate(), iter.getCoord(), background);
       mNodes[iter.pos()].setChild(child);
-      child->readTopology(is, fromHalf);
+      child->readTopology(is, half_precision);
   }
 #endif
 
   return true;
 }
-
-#if 0
-template<typename ChildT>
-bool TreeReader::Read(std::istream &is)
-{
-  
-}
-#endif
 
 GridDescriptor::GridDescriptor()
     : save_float_as_half_(false), grid_pos_(0), block_pos_(0), end_pos_(0) {}
@@ -1534,7 +1851,7 @@ GridDescriptor::GridDescriptor(const std::string &name,
 // GridDescriptor::GridDescriptor(const GridDescriptor &rhs) {
 //}
 
-GridDescriptor::~GridDescriptor() {}
+//GridDescriptor::~GridDescriptor() {}
 
 std::string GridDescriptor::AddSuffix(const std::string &name, int n) {
   std::ostringstream ss;
@@ -1546,12 +1863,12 @@ std::string GridDescriptor::StripSuffix(const std::string &name) {
   return name.substr(0, name.find(SEP));
 }
 
-bool GridDescriptor::Read(std::ifstream &is, const unsigned int file_version,
+bool GridDescriptor::Read(StreamReader *sr, const unsigned int file_version,
                           std::string *err) {
-  unique_name_ = ReadString(is);
+  unique_name_ = ReadString(sr);
   grid_name_ = StripSuffix(unique_name_);
 
-  grid_type_ = ReadString(is);
+  grid_type_ = ReadString(sr);
 
   if (EndsWidth(grid_type_, HALF_FLOAT_TYPENAME_SUFFIX)) {
     save_float_as_half_ = true;
@@ -1573,7 +1890,7 @@ bool GridDescriptor::Read(std::ifstream &is, const unsigned int file_version,
   std::cout << "half = " << save_float_as_half_ << std::endl;
 
   if (file_version >= OPENVDB_FILE_VERSION_GRID_INSTANCING) {
-    instance_parent_name_ = ReadString(is);
+    instance_parent_name_ = ReadString(sr);
     std::cout << "instance_parent_name = " << instance_parent_name_
               << std::endl;
   }
@@ -1588,9 +1905,9 @@ bool GridDescriptor::Read(std::ifstream &is, const unsigned int file_version,
   // if (grid) grid->setSaveFloatAsHalf(mSaveFloatAsHalf);
 
   // Read in the offsets.
-  is.read(reinterpret_cast<char *>(&grid_pos_), sizeof(tinyvdb_int64));
-  is.read(reinterpret_cast<char *>(&block_pos_), sizeof(tinyvdb_int64));
-  is.read(reinterpret_cast<char *>(&end_pos_), sizeof(tinyvdb_int64));
+  sr->read8(&grid_pos_);
+  sr->read8(&block_pos_);
+  sr->read8(&end_pos_);
 
   std::cout << "grid_pos = " << grid_pos_ << std::endl;
   std::cout << "block_pos = " << block_pos_ << std::endl;
@@ -1599,73 +1916,71 @@ bool GridDescriptor::Read(std::ifstream &is, const unsigned int file_version,
   return true;
 }
 
-static bool ReadMeta(std::ifstream &is) {
+static bool ReadMeta(StreamReader *sr) {
   // Read the number of metadata items.
   int count = 0;
-  is.read(reinterpret_cast<char *>(&count), sizeof(int));
-  swap4(&count);
+  sr->read4(&count);
 
-  std::cout << "meta = " << count << std::endl;
+  std::cout << "meta_count = " << count << std::endl;
 
   for (int i = 0; i < count; i++) {
-    std::string name = ReadString(is);
+    std::string name = ReadString(sr);
 
     // read typename string
-    std::string type_name = ReadString(is);
+    std::string type_name = ReadString(sr);
 
     std::cout << "meta[" << i << "] name = " << name
               << ", type_name = " << type_name << std::endl;
 
     if (type_name.compare("string") == 0) {
-      std::string value = ReadString(is);
+      std::string value = ReadString(sr);
 
       std::cout << "  value = " << value << std::endl;
 
     } else if (type_name.compare("vec3i") == 0) {
       int v[3];
-      ReadMetaVec3i(is, v);
+      ReadMetaVec3i(sr, v);
 
       std::cout << "  value = " << v[0] << ", " << v[1] << ", " << v[2]
                 << std::endl;
 
     } else if (type_name.compare("bool") == 0) {
-      bool b = ReadMetaBool(is);
+      bool b = ReadMetaBool(sr);
 
       std::cout << "  value = " << b << std::endl;
 
     } else if (type_name.compare("float") == 0) {
-      float f = ReadMetaFloat(is);
+      float f = ReadMetaFloat(sr);
 
       std::cout << "  value = " << f << std::endl;
 
     } else if (type_name.compare("int64") == 0) {
-      tinyvdb_int64 i64 = ReadMetaInt64(is);
+      tinyvdb_int64 i64 = ReadMetaInt64(sr);
 
       std::cout << "  value = " << i64 << std::endl;
 
     } else {
       // Unknown metadata
       int num_bytes;
-      is.read(reinterpret_cast<char *>(&num_bytes), sizeof(int));
-      swap4(&num_bytes);
+      sr->read4(&num_bytes);
 
       std::cout << "  unknown value. size = " << num_bytes << std::endl;
 
       std::vector<char> data;
       data.resize(size_t(num_bytes));
-      is.read(data.data(), num_bytes);
+      sr->read(size_t(num_bytes), tinyvdb_uint64(num_bytes), reinterpret_cast<unsigned char *>(data.data()));
     }
   }
 
   return true;
 }
 
-static void ReadGridDescriptors(std::ifstream &is,
+static void ReadGridDescriptors(StreamReader *sr,
                                 const unsigned int file_version,
                                 std::map<std::string, GridDescriptor> *gd_map) {
   // Read the number of metadata items.
   int count = 0;
-  is.read(reinterpret_cast<char *>(&count), sizeof(int));
+  sr->read4(&count);
 
   std::cout << "grid descriptors = " << count << std::endl;
 
@@ -1673,7 +1988,7 @@ static void ReadGridDescriptors(std::ifstream &is,
     // Read the grid descriptor.
     GridDescriptor gd;
     std::string err;
-    bool ret = gd.Read(is, file_version, &err);
+    bool ret = gd.Read(sr, file_version, &err);
     assert(ret);
 
     (*gd_map)[gd.GridName()] = gd;
@@ -1687,9 +2002,9 @@ static void ReadGridDescriptors(std::ifstream &is,
   }
 }
 
-static void ReadTransform(std::ifstream &is) {
+static void ReadTransform(StreamReader *sr) {
   // Read the type name.
-  std::string type = ReadString(is);
+  std::string type = ReadString(sr);
 
   std::cout << "transform type = " << type << std::endl;
 
@@ -1707,11 +2022,11 @@ static void ReadTransform(std::ifstream &is) {
     inv_scale_squared[0] = inv_scale_squared[1] = inv_scale_squared[2] = 0.0;
     inv_twice_scale[0] = inv_twice_scale[1] = inv_twice_scale[2] = 0.0;
 
-    ReadVec3d(is, scale_values);
-    ReadVec3d(is, voxel_size);
-    ReadVec3d(is, scale_values_inverse);
-    ReadVec3d(is, inv_scale_squared);
-    ReadVec3d(is, inv_twice_scale);
+    ReadVec3d(sr, scale_values);
+    ReadVec3d(sr, voxel_size);
+    ReadVec3d(sr, scale_values_inverse);
+    ReadVec3d(sr, inv_scale_squared);
+    ReadVec3d(sr, inv_twice_scale);
 
     std::cout << "scale_values " << scale_values[0] << ", " << scale_values[1]
               << ", " << scale_values[2] << std::endl;
@@ -1733,19 +2048,20 @@ static void ReadTransform(std::ifstream &is) {
   // TODO(syoyo) read transform
 }
 
-static void ReadGrid(std::ifstream &is, const unsigned int file_version,
+static void ReadGrid(StreamReader *sr, const unsigned int file_version,
                      const GridDescriptor &gd) {
   if (file_version >= OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
     unsigned int c = COMPRESS_NONE;
-    is.read(reinterpret_cast<char *>(&c), sizeof(unsigned int));
+    sr->read4(&c);
     std::cout << "compression: " << c << std::endl;
     // io::setDataCompression(is, c);
   }
 
-  ReadMeta(is);
+  // read meta
+  ReadMeta(sr);
 
   // read transform
-  ReadTransform(is);
+  ReadTransform(sr);
 
   // read topology
   if (!gd.IsInstance()) {
@@ -1760,10 +2076,12 @@ static void ReadGrid(std::ifstream &is, const unsigned int file_version,
     InternalNode internal1_node(internal1, &internal2_node);
     RootNode root_node(root, &internal1_node);
 
-    root_node.ReadTopology(is, gd.SaveFloatAsHalf(), file_version);
+    root_node.ReadTopology(sr, gd.SaveFloatAsHalf(), file_version);
   }
 
-  is.seekg(gd.GridPos());
+  // Move to grid position
+  sr->seek_set(tinyvdb_uint64(gd.GridPos()));
+  //is.seekg(gd.GridPos());
 }
 
 bool ParseVDBHeader(const std::string &filename, std::string *err) {
@@ -1781,6 +2099,7 @@ bool ParseVDBHeader(const std::string &filename, std::string *err) {
   if (!ifs.read(reinterpret_cast<char *>(&magic), 8)) {
     return EXIT_FAILURE;
   }
+  swap8(&magic);
 
   if (magic == kOPENVDB_MAGIC) {
     std::cout << "bingo!" << std::endl;
@@ -1973,4 +2292,4 @@ bool SaveVDB(const std::string &filename, std::string *err) {
 
 #endif
 
-#endif  // TINY_VDB_H_
+#endif  // TINY_VDB_IO_H_

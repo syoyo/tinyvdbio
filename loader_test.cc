@@ -1,11 +1,12 @@
+#define TINYVDBIO_IMPLEMENTATION
+#include "tinyvdbio.h"
+
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <fstream>
 //#include <cstdint>
 
-#define TINYVDB_IMPLEMENTATION
-#include "tinyvdb.h"
 
 int main(int argc, char **argv)
 {
