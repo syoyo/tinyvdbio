@@ -33,10 +33,11 @@
 
 #include <cassert>
 #include <cstring>
+#include <fstream>
+#include <iostream>
+#include <map>
 #include <string>
 #include <vector>
-#include <iostream>
-#include <fstream>
 
 namespace tinyvdb {
 
@@ -65,20 +66,31 @@ typedef tinyvdb_uint64 int64;
 #ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wpadded"
+#pragma clang diagnostic ignored "-Wc++11-long-long"
 #endif
 
-typedef struct
-{
+typedef struct {
   unsigned int file_version;
-  bool has_grid_offsets;
+  unsigned int major_version;
+  unsigned int minor_version;
+  // bool has_grid_offsets;
   bool is_compressed;
+  bool half_precision;
   std::string uuid;
+  tinyvdb_uint64 offset_to_data;  // Byte offset to VDB data
 } VDBHeader;
 
 typedef struct {
-
 } VDBMeta;
 
+typedef enum {
+  TINYVDBIO_SUCCESS,
+  TINYVDBIO_ERROR_INVALID_FILE,
+  TINYVDBIO_ERROR_INVALID_HEADER,
+  TINYVDBIO_ERROR_INVALID_DATA,
+  TINYVDBIO_ERROR_INVALID_ARGUMENT,
+  TINYVDBIO_ERROR_UNIMPLEMENTED
+} VDBStatus;
 
 // forward decl.
 class StreamReader;
@@ -123,7 +135,9 @@ inline int32 CountOn(unsigned char v) {
 }
 
 /// Return the number of off bits in the given 8-bit value.
-inline int32 CountOff(unsigned char v) { return CountOn(static_cast<unsigned char>(~v)); }
+inline int32 CountOff(unsigned char v) {
+  return CountOn(static_cast<unsigned char>(~v));
+}
 
 /// Return the number of on bits in the given 32-bit value.
 inline int32 CountOn(int32 v) {
@@ -165,9 +179,9 @@ inline int32 FindLowestOn(int32 v) {
                   // local statics
   static
 #endif
-      const unsigned char DeBruijn[32] = {0,  1,  28, 2,  29, 14, 24, 3,  30, 22, 20,
-                                 15, 25, 17, 4,  8,  31, 27, 13, 23, 21, 19,
-                                 16, 7,  26, 12, 18, 6,  11, 5,  10, 9};
+      const unsigned char DeBruijn[32] = {
+          0,  1,  28, 2,  29, 14, 24, 3, 30, 22, 20, 15, 25, 17, 4,  8,
+          31, 27, 13, 23, 21, 19, 16, 7, 26, 12, 18, 6,  11, 5,  10, 9};
   return DeBruijn[int32((v & -v) * 0x077CB531U) >> 27];
 }
 
@@ -194,9 +208,9 @@ inline int32 FindHighestOn(int32 v) {
                   // local statics
   static
 #endif
-      const unsigned char DeBruijn[32] = {0,  9,  1,  10, 13, 21, 2,  29, 11, 14, 16,
-                                 18, 22, 25, 3,  30, 8,  12, 20, 28, 15, 17,
-                                 24, 7,  19, 27, 23, 6,  26, 5,  4,  31};
+      const unsigned char DeBruijn[32] = {
+          0, 9,  1,  10, 13, 21, 2,  29, 11, 14, 16, 18, 22, 25, 3, 30,
+          8, 12, 20, 28, 15, 17, 24, 7,  19, 27, 23, 6,  26, 5,  4, 31};
   v |= v >> 1;  // first round down to one less than a power of 2
   v |= v >> 2;
   v |= v >> 4;
@@ -211,7 +225,7 @@ inline int32 FindHighestOn(int32 v) {
 template <typename NodeMask>
 class BaseMaskIterator {
  protected:
-  int32 mPos;             // bit position
+  int32 mPos;               // bit position
   const NodeMask* mParent;  // this iterator can't change the parent_mask!
 
  public:
@@ -639,9 +653,10 @@ class NodeMask {
   void save(std::ostream& os) const {
     os.write(reinterpret_cast<const char*>(mWords.data()), this->memUsage());
   }
-  void load(StreamReader *sr) {
+  void load(StreamReader* sr) {
     (void)sr;
-    //sr->read(this->memUsage(), this->memUsage(), reinterpret_cast<char*>(mWords.data()));
+    // sr->read(this->memUsage(), this->memUsage(),
+    // reinterpret_cast<char*>(mWords.data()));
     return;
   }
   void seek(std::istream& is) const {
@@ -669,7 +684,7 @@ class NodeMask {
   }
 
   int32 findNextOn(int32 start) const {
-    int32 n = start >> 6;            // initiate
+    int32 n = start >> 6;              // initiate
     if (n >= WORD_COUNT) return SIZE;  // check for out of bounds
     int32 m = start & 63;
     Word b = mWords[n];
@@ -680,7 +695,7 @@ class NodeMask {
   }
 
   int32 findNextOff(int32 start) const {
-    int32 n = start >> 6;            // initiate
+    int32 n = start >> 6;              // initiate
     if (n >= WORD_COUNT) return SIZE;  // check for out of bounds
     int32 m = start & 63;
     Word b = ~mWords[n];
@@ -777,7 +792,9 @@ class Value {
   explicit Value(float f) : type_(VALUE_TYPE_FLOAT) { float_value_ = f; }
   explicit Value(double d) : type_(VALUE_TYPE_DOUBLE) { double_value_ = d; }
   explicit Value(int n) : type_(VALUE_TYPE_INT) { int_value_ = n; }
-  explicit Value(const std::string &str) : type_(VALUE_TYPE_STRING) { string_value_ = str; }
+  explicit Value(const std::string &str) : type_(VALUE_TYPE_STRING) {
+    string_value_ = str;
+  }
 
   ValueType Type() const { return type_; }
 
@@ -1022,19 +1039,67 @@ class TreeReader {
 
 ///
 /// Parse VDB header from a file.
-/// Returns true upon success.
+/// Returns TINYVDBIO_SUCCESS upon success and `header` will be filled.
 /// Returns false when failed to parse VDB header and store error message to
 /// `err`.
 ///
-bool ParseVDBHeader(const std::string &filename, std::string *err);
+VDBStatus ParseVDBHeader(const std::string &filename, VDBHeader *header,
+                         std::string *err);
 
 ///
 /// Parse VDB header from memory.
-/// Returns true upon success.
+/// Returns TINYVDBIO_SUCCESS upon success and `header` will be filled.
 /// Returns false when failed to parse VDB header and store error message to
 /// `err`.
 ///
-bool ParseVDBHeader(const unsigned char *data, const size_t len,
+VDBStatus ParseVDBHeader(const unsigned char *data, const size_t len,
+                         VDBHeader *header, std::string *err);
+
+///
+/// Load Grid descriptors from file
+///
+/// Returns TINYVDBIO_SUCCESS upon success.
+/// Returns false when failed to read VDB data and store error message to
+/// `err`.
+///
+VDBStatus ReadGridDescriptors(const std::string &filename,
+                              const VDBHeader &header,
+                              std::map<std::string, GridDescriptor> *gd_map,
+                              std::string *err);
+
+///
+/// Load Grid descriptors from memory
+///
+/// Returns TINYVDBIO_SUCCESS upon success.
+/// Returns false when failed to read VDB data and store error message to
+/// `err`.
+///
+VDBStatus ReadGridDescriptors(const unsigned char *data, const size_t data_len,
+                              const VDBHeader &header,
+                              std::map<std::string, GridDescriptor> *gd_map,
+                              std::string *err);
+
+///
+/// Load Grid data from file
+///
+/// Returns TINYVDBIO_SUCCESS upon success.
+/// Returns false when failed to read VDB data and store error message to
+/// `err`.
+///
+VDBStatus ReadGrids(const std::string &filename, const VDBHeader &header,
+                    const std::map<std::string, GridDescriptor> &gd_map,
+                    std::string *err);
+
+///
+/// Load Grid data from memory
+///
+/// Returns TINYVDBIO_SUCCESS upon success.
+/// Returns false when failed to read VDB data and store error message to
+/// `err`.
+///
+VDBStatus ReadGrids(const unsigned char *data, const size_t data_len,
+                    const VDBHeader &header,
+                    const std::map<std::string, GridDescriptor> &gd_map,
                     std::string *err);
 
 ///
@@ -1047,10 +1112,16 @@ bool SaveVDB(const std::string &filename, std::string *err);
 #ifdef TINYVDBIO_IMPLEMENTATION
 
 #include <cassert>
-#include <iostream> // HACK
-#include <map>
+#include <iostream>  // HACK
 #include <sstream>
 #include <vector>
+
+#ifdef __clang__
+#pragma clang diagnostic push
+#if __has_warning("-Wzero-as-null-pointer-constant")
+#pragma clang diagnostic ignored "-Wzero-as-null-pointer-constant"
+#endif
+#endif
 
 namespace tinyvdb {
 
@@ -1205,22 +1276,15 @@ static inline FP16 float_to_half_full(FP32 f) {
 }
 
 static inline void swap2(unsigned short *val) {
-#ifdef MINIZ_LITTLE_ENDIAN
-  (void)val;
-#else
   unsigned short tmp = *val;
   unsigned char *dst = reinterpret_cast<unsigned char *>(val);
   unsigned char *src = reinterpret_cast<unsigned char *>(&tmp);
 
   dst[0] = src[1];
   dst[1] = src[0];
-#endif
 }
 
 static inline void swap4(unsigned int *val) {
-#ifdef MINIZ_LITTLE_ENDIAN
-  (void)val;
-#else
   unsigned int tmp = *val;
   unsigned char *dst = reinterpret_cast<unsigned char *>(val);
   unsigned char *src = reinterpret_cast<unsigned char *>(&tmp);
@@ -1229,13 +1293,9 @@ static inline void swap4(unsigned int *val) {
   dst[1] = src[2];
   dst[2] = src[1];
   dst[3] = src[0];
-#endif
 }
 
 static inline void swap4(int *val) {
-#ifdef MINIZ_LITTLE_ENDIAN
-  (void)val;
-#else
   int tmp = *val;
   unsigned char *dst = reinterpret_cast<unsigned char *>(val);
   unsigned char *src = reinterpret_cast<unsigned char *>(&tmp);
@@ -1244,13 +1304,9 @@ static inline void swap4(int *val) {
   dst[1] = src[2];
   dst[2] = src[1];
   dst[3] = src[0];
-#endif
 }
 
 static inline void swap8(tinyvdb::tinyvdb_uint64 *val) {
-#ifdef MINIZ_LITTLE_ENDIAN
-  (void)val;
-#else
   tinyvdb::tinyvdb_uint64 tmp = (*val);
   unsigned char *dst = reinterpret_cast<unsigned char *>(val);
   unsigned char *src = reinterpret_cast<unsigned char *>(&tmp);
@@ -1263,13 +1319,9 @@ static inline void swap8(tinyvdb::tinyvdb_uint64 *val) {
   dst[5] = src[2];
   dst[6] = src[1];
   dst[7] = src[0];
-#endif
 }
 
 static inline void swap8(tinyvdb::tinyvdb_int64 *val) {
-#ifdef MINIZ_LITTLE_ENDIAN
-  (void)val;
-#else
   tinyvdb::tinyvdb_int64 tmp = (*val);
   unsigned char *dst = reinterpret_cast<unsigned char *>(val);
   unsigned char *src = reinterpret_cast<unsigned char *>(&tmp);
@@ -1282,7 +1334,6 @@ static inline void swap8(tinyvdb::tinyvdb_int64 *val) {
   dst[5] = src[2];
   dst[6] = src[1];
   dst[7] = src[0];
-#endif
 }
 
 ///
@@ -1290,7 +1341,7 @@ static inline void swap8(tinyvdb::tinyvdb_int64 *val) {
 ///
 class StreamReader {
  public:
-  explicit StreamReader(const uint8_t* binary, const size_t length,
+  explicit StreamReader(const uint8_t *binary, const size_t length,
                         const bool swap_endian)
       : binary_(binary), length_(length), swap_endian_(swap_endian), idx_(0) {
     (void)pad_;
@@ -1318,7 +1369,7 @@ class StreamReader {
     return true;
   }
 
-  size_t read(const size_t n, const uint64_t dst_len, unsigned char* dst) {
+  size_t read(const size_t n, const uint64_t dst_len, unsigned char *dst) {
     size_t len = n;
     if ((idx_ + len) > length_) {
       len = length_ - idx_;
@@ -1331,6 +1382,7 @@ class StreamReader {
       }
 
       memcpy(dst, &binary_[idx_], len);
+      idx_ += len;
       return len;
 
     } else {
@@ -1338,7 +1390,7 @@ class StreamReader {
     }
   }
 
-  bool read1(unsigned char* ret) {
+  bool read1(unsigned char *ret) {
     if ((idx_ + 1) > length_) {
       return false;
     }
@@ -1351,7 +1403,7 @@ class StreamReader {
     return true;
   }
 
-  bool read_bool(bool* ret) {
+  bool read_bool(bool *ret) {
     if ((idx_ + 1) > length_) {
       return false;
     }
@@ -1364,7 +1416,7 @@ class StreamReader {
     return true;
   }
 
-  bool read1(char* ret) {
+  bool read1(char *ret) {
     if ((idx_ + 1) > length_) {
       return false;
     }
@@ -1377,13 +1429,13 @@ class StreamReader {
     return true;
   }
 
-  bool read2(unsigned short* ret) {
+  bool read2(unsigned short *ret) {
     if ((idx_ + 2) > length_) {
       return false;
     }
 
     unsigned short val =
-        *(reinterpret_cast<const unsigned short*>(&binary_[idx_]));
+        *(reinterpret_cast<const unsigned short *>(&binary_[idx_]));
 
     if (swap_endian_) {
       swap2(&val);
@@ -1395,12 +1447,13 @@ class StreamReader {
     return true;
   }
 
-  bool read4(unsigned int* ret) {
+  bool read4(unsigned int *ret) {
     if ((idx_ + 4) > length_) {
       return false;
     }
 
-    unsigned int val = *(reinterpret_cast<const unsigned int*>(&binary_[idx_]));
+    unsigned int val =
+        *(reinterpret_cast<const unsigned int *>(&binary_[idx_]));
 
     if (swap_endian_) {
       swap4(&val);
@@ -1412,12 +1465,12 @@ class StreamReader {
     return true;
   }
 
-  bool read4(int* ret) {
+  bool read4(int *ret) {
     if ((idx_ + 4) > length_) {
       return false;
     }
 
-    int val = *(reinterpret_cast<const int*>(&binary_[idx_]));
+    int val = *(reinterpret_cast<const int *>(&binary_[idx_]));
 
     if (swap_endian_) {
       swap4(&val);
@@ -1434,7 +1487,8 @@ class StreamReader {
       return false;
     }
 
-    tinyvdb_uint64 val = *(reinterpret_cast<const tinyvdb_uint64*>(&binary_[idx_]));
+    tinyvdb_uint64 val =
+        *(reinterpret_cast<const tinyvdb_uint64 *>(&binary_[idx_]));
 
     if (swap_endian_) {
       swap8(&val);
@@ -1442,20 +1496,6 @@ class StreamReader {
 
     (*ret) = val;
     idx_ += 8;
-
-    return true;
-  }
-
-  bool read_float(float* ret) {
-
-    if (!ret) {
-      return false;
-    }
-
-    float value;
-    if (!read4(reinterpret_cast<int*>(&value))) {
-      return false;
-    }
 
     return true;
   }
@@ -1465,7 +1505,8 @@ class StreamReader {
       return false;
     }
 
-    tinyvdb_int64 val = *(reinterpret_cast<const tinyvdb_int64*>(&binary_[idx_]));
+    tinyvdb_int64 val =
+        *(reinterpret_cast<const tinyvdb_int64 *>(&binary_[idx_]));
 
     if (swap_endian_) {
       swap8(&val);
@@ -1477,30 +1518,46 @@ class StreamReader {
     return true;
   }
 
-  bool read_double(double* ret) {
+  bool read_float(float *ret) {
+    if (!ret) {
+      return false;
+    }
 
+    float value;
+    if (!read4(reinterpret_cast<int *>(&value))) {
+      return false;
+    }
+
+    (*ret) = value;
+
+    return true;
+  }
+
+  bool read_double(double *ret) {
     if (!ret) {
       return false;
     }
 
     double value;
-    if (!read8(reinterpret_cast<tinyvdb_uint64*>(&value))) {
+    if (!read8(reinterpret_cast<tinyvdb_uint64 *>(&value))) {
       return false;
     }
+
+    (*ret) = value;
 
     return true;
   }
 
   size_t tell() const { return idx_; }
 
-  const uint8_t* data() const { return binary_; }
+  const uint8_t *data() const { return binary_; }
 
   bool swap_endian() const { return swap_endian_; }
 
   size_t size() const { return length_; }
 
  private:
-  const uint8_t* binary_;
+  const uint8_t *binary_;
   const size_t length_;
   bool swap_endian_;
   char pad_[7];
@@ -1531,7 +1588,7 @@ static Value ReadValue(StreamReader *sr, const ValueType type) {
   return Value();
 }
 
-#if 0 // remove
+#if 0  // remove
 static inline std::string ReadString(std::istream &is) {
   unsigned int size;
   is.read(reinterpret_cast<char *>(&size), sizeof(unsigned int));
@@ -1546,7 +1603,7 @@ static inline std::string ReadString(StreamReader *sr) {
   sr->read4(&size);
   if (size > 0) {
     std::string buffer(size, ' ');
-    sr->read(size, size, reinterpret_cast<unsigned char*>(&buffer[0]));
+    sr->read(size, size, reinterpret_cast<unsigned char *>(&buffer[0]));
     return buffer;
   }
   return std::string();
@@ -1563,7 +1620,7 @@ static inline bool ReadMetaBool(StreamReader *sr) {
   unsigned int size;
   sr->read4(&size);
   if (size == 1) {
-    sr->read(1, 1, reinterpret_cast<unsigned char*>(&c));
+    sr->read(1, 1, reinterpret_cast<unsigned char *>(&c));
   }
   return bool(c);
 }
@@ -1588,20 +1645,30 @@ static inline void ReadMetaVec3i(StreamReader *sr, int v[3]) {
   }
 }
 
+static inline void ReadMetaVec3d(StreamReader *sr, double v[3]) {
+  unsigned int size;
+  sr->read4(&size);
+  if (size == 3 * sizeof(double)) {
+    sr->read_double(&v[0]);
+    sr->read_double(&v[1]);
+    sr->read_double(&v[2]);
+  }
+}
+
+static inline tinyvdb_int64 ReadMetaInt64(StreamReader *sr) {
+  unsigned int size;
+  tinyvdb_int64 i64 = 0;
+  sr->read4(&size);
+  if (size == sizeof(tinyvdb_int64)) {
+    sr->read8(reinterpret_cast<tinyvdb_uint64 *>(&i64));
+  }
+  return i64;
+}
+
 static inline void ReadVec3d(StreamReader *sr, double v[3]) {
   sr->read_double(&v[0]);
   sr->read_double(&v[1]);
   sr->read_double(&v[2]);
-}
-
-static inline tinyvdb_int64 ReadMetaInt64(StreamReader *sr) {
-  tinyvdb_int64 i64 = 0;
-  unsigned int size;
-  sr->read4(&size);
-  if (size == 4) {
-    sr->read8(reinterpret_cast<tinyvdb_uint64 *>(&i64));
-  }
-  return i64;
 }
 
 // https://stackoverflow.com/questions/874134/find-if-string-ends-with-another-string-in-c
@@ -1613,18 +1680,13 @@ static inline bool EndsWidth(std::string const &value,
 
 bool RootNode::ReadTopology(StreamReader *sr, const bool half_precision,
                             const unsigned int file_version) {
-  {
-    int buffer_count;
-    sr->read4(&buffer_count);
-    if (buffer_count != 1) {
-      // OPENVDB_LOG_WARN("multi-buffer trees are no longer supported");
-    }
-  }
+
+  std::cout << "Root background loc " << sr->tell() << std::endl;
 
   // Read background value;
   background_ = ReadValue(sr, node_info_.value_type());
 
-  std::cout << "background : " << background_ << std::endl;
+  std::cout << "background : " << background_ << ", size = " << GetValueTypeSize(node_info_.value_type()) << std::endl;
 
   unsigned int num_tiles = 0;
   unsigned int num_children = 0;
@@ -1674,6 +1736,7 @@ bool RootNode::ReadTopology(StreamReader *sr, const bool half_precision,
   return true;
 }
 
+#if 0
 static bool ReadCompressedData(StreamReader *sr, unsigned char *dst_data,
                         size_t element_size, size_t count,
                         unsigned int compression_mask) {
@@ -1743,7 +1806,7 @@ static bool ReadCompressedValues(
   (void)half_precision;
   (void)background;
   (void)values;
-#if 0 // TODO
+#if 0  // TODO
   if (half_precision) {
     ReadCompressedData(sr, buf.data(), sizeof(short), num_values, compression_flags);
     // fp16 -> fp32
@@ -1769,6 +1832,7 @@ static bool ReadCompressedValues(
 
   return false;
 }
+#endif
 
 bool InternalNode::ReadTopology(StreamReader *sr, const bool half_precision,
                                 const unsigned int file_version) {
@@ -1776,13 +1840,18 @@ bool InternalNode::ReadTopology(StreamReader *sr, const bool half_precision,
   (void)file_version;
   (void)child_node_;
 
+#if 0 // API3
   {
+
     int buffer_count;
     sr->read4(&buffer_count);
     if (buffer_count != 1) {
       // OPENVDB_LOG_WARN("multi-buffer trees are no longer supported");
     }
   }
+#endif
+
+  std::cout << "topo: buffer count offt = " << sr->tell() << std::endl;
 
   child_mask_.load(sr);
   value_mask_.load(sr);
@@ -1801,7 +1870,7 @@ bool InternalNode::ReadTopology(StreamReader *sr, const bool half_precision,
     std::vector<unsigned char> values;
     values.resize(GetValueTypeSize(node_info_.value_type()) *
                   size_t(num_values));
-#if 0 // TODO
+#if 0  // TODO
     if (!ReadCompressedValues(is, num_values, node_info_.value_type(), value_mask_, half_precision,
                          &values)) {
       return false;
@@ -1851,7 +1920,7 @@ GridDescriptor::GridDescriptor(const std::string &name,
 // GridDescriptor::GridDescriptor(const GridDescriptor &rhs) {
 //}
 
-//GridDescriptor::~GridDescriptor() {}
+// GridDescriptor::~GridDescriptor() {}
 
 std::string GridDescriptor::AddSuffix(const std::string &name, int n) {
   std::ostringstream ss;
@@ -1921,6 +1990,11 @@ static bool ReadMeta(StreamReader *sr) {
   int count = 0;
   sr->read4(&count);
 
+  if (count > 1024) {
+    // Too many meta values.
+    return false;
+  }
+
   std::cout << "meta_count = " << count << std::endl;
 
   for (int i = 0; i < count; i++) {
@@ -1943,6 +2017,14 @@ static bool ReadMeta(StreamReader *sr) {
 
       std::cout << "  value = " << v[0] << ", " << v[1] << ", " << v[2]
                 << std::endl;
+
+    } else if (type_name.compare("vec3d") == 0) {
+      double v[3];
+      ReadMetaVec3d(sr, v);
+
+      std::cout << "  value = " << v[0] << ", " << v[1] << ", " << v[2]
+                << std::endl;
+
 
     } else if (type_name.compare("bool") == 0) {
       bool b = ReadMetaBool(sr);
@@ -1968,41 +2050,43 @@ static bool ReadMeta(StreamReader *sr) {
 
       std::vector<char> data;
       data.resize(size_t(num_bytes));
-      sr->read(size_t(num_bytes), tinyvdb_uint64(num_bytes), reinterpret_cast<unsigned char *>(data.data()));
+      sr->read(size_t(num_bytes), tinyvdb_uint64(num_bytes),
+               reinterpret_cast<unsigned char *>(data.data()));
     }
   }
 
   return true;
 }
 
-static void ReadGridDescriptors(StreamReader *sr,
+static bool ReadGridDescriptors(StreamReader *sr,
                                 const unsigned int file_version,
                                 std::map<std::string, GridDescriptor> *gd_map) {
   // Read the number of metadata items.
   int count = 0;
   sr->read4(&count);
 
-  std::cout << "grid descriptors = " << count << std::endl;
+  std::cout << "grid descriptor counts = " << count << std::endl;
 
   for (int i = 0; i < count; ++i) {
     // Read the grid descriptor.
     GridDescriptor gd;
     std::string err;
     bool ret = gd.Read(sr, file_version, &err);
-    assert(ret);
+    if (!ret) {
+      return false;
+    }
 
+    //  // Add the descriptor to the dictionary.
     (*gd_map)[gd.GridName()] = gd;
-#if 0
-      // Add the descriptor to the dictionary.
-      gridDescriptors().insert(std::make_pair(gd.gridName(), gd));
 
-      // Skip forward to the next descriptor.
-      gd.seekToEnd(is);
-#endif
+    // Skip forward to the next descriptor.
+    sr->seek_set(tinyvdb_uint64(gd.EndPos()));
   }
+
+  return true;
 }
 
-static void ReadTransform(StreamReader *sr) {
+static bool ReadTransform(StreamReader *sr, std::string *err) {
   // Read the type name.
   std::string type = ReadString(sr);
 
@@ -2015,6 +2099,8 @@ static void ReadTransform(StreamReader *sr) {
   double inv_twice_scale[3];
 
   if (type.compare("UniformScaleMap") == 0) {
+    std::cout << "offt = " << sr->tell() << std::endl;
+
     scale_values[0] = scale_values[1] = scale_values[2] = 0.0;
     voxel_size[0] = voxel_size[1] = voxel_size[2] = 0.0;
     scale_values_inverse[0] = scale_values_inverse[1] =
@@ -2041,27 +2127,39 @@ static void ReadTransform(StreamReader *sr) {
     std::cout << "inv_twice_scale " << inv_twice_scale[0] << ", "
               << inv_twice_scale[1] << ", " << inv_twice_scale[2] << std::endl;
   } else {
-    assert(0);
-    // TODO(syoyo): Implement
+    if (err) {
+      (*err) = "Transform type " + type + " is not supported.";
+    }
+    return false;
   }
 
-  // TODO(syoyo) read transform
+  return true;
 }
 
-static void ReadGrid(StreamReader *sr, const unsigned int file_version,
-                     const GridDescriptor &gd) {
+static unsigned int ReadGridCompression(StreamReader *sr,
+                                        unsigned int file_version) {
+  unsigned int compression = COMPRESS_NONE;
   if (file_version >= OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
-    unsigned int c = COMPRESS_NONE;
-    sr->read4(&c);
-    std::cout << "compression: " << c << std::endl;
-    // io::setDataCompression(is, c);
+    sr->read4(&compression);
   }
+  return compression;
+}
+
+static bool ReadGrid(StreamReader *sr, const unsigned int file_version,
+                     const GridDescriptor &gd, std::string *err) {
+  // read compression per grid(optional)
+  unsigned int grid_compression = ReadGridCompression(sr, file_version);
+  (void)grid_compression;
 
   // read meta
-  ReadMeta(sr);
+  if (!ReadMeta(sr)) {
+    return false;
+  }
 
   // read transform
-  ReadTransform(sr);
+  if (!ReadTransform(sr, err)) {
+    return false;
+  }
 
   // read topology
   if (!gd.IsInstance()) {
@@ -2076,52 +2174,141 @@ static void ReadGrid(StreamReader *sr, const unsigned int file_version,
     InternalNode internal1_node(internal1, &internal2_node);
     RootNode root_node(root, &internal1_node);
 
+    // TreeBase
+    {
+      int buffer_count;
+      sr->read4(&buffer_count);
+      if (buffer_count != 1) {
+        // OPENVDB_LOG_WARN("multi-buffer trees are no longer supported");
+      }
+    }
+
     root_node.ReadTopology(sr, gd.SaveFloatAsHalf(), file_version);
   }
 
   // Move to grid position
-  sr->seek_set(tinyvdb_uint64(gd.GridPos()));
-  //is.seekg(gd.GridPos());
+  //sr->seek_set(tinyvdb_uint64(gd.GridPos()));
+
+  return true;
 }
 
-bool ParseVDBHeader(const std::string &filename, std::string *err) {
-  std::ifstream ifs(filename.c_str(), std::ifstream::binary);
-  if (!ifs) {
+VDBStatus ParseVDBHeader(const std::string &filename, VDBHeader *header,
+                         std::string *err) {
+  if (header == NULL) {
     if (err) {
-      (*err) = "File not found or cannot open file : " + filename;
+      (*err) = "Invalid function arguments";
     }
-    return false;
+    return TINYVDBIO_ERROR_INVALID_ARGUMENT;
   }
 
-  int64_t magic;
+  // TODO(Syoyo): Load only header region.
+  std::vector<unsigned char> data;
+  {
+    std::ifstream ifs(filename.c_str(), std::ifstream::binary);
+    if (!ifs) {
+      if (err) {
+        (*err) = "File not found or cannot open file : " + filename;
+      }
+      return TINYVDBIO_ERROR_INVALID_FILE;
+    }
+
+    // TODO(syoyo): Use mmap
+    ifs.seekg(0, ifs.end);
+    size_t sz = static_cast<size_t>(ifs.tellg());
+    if (tinyvdb_int64(sz) < 0) {
+      // Looks reading directory, not a file.
+      if (err) {
+        (*err) += "Looks like filename is a directory : \"" + filename + "\"\n";
+      }
+      return TINYVDBIO_ERROR_INVALID_FILE;
+    }
+
+    if (sz < 16) {
+      // ???
+      if (err) {
+        (*err) +=
+            "File size too short. Looks like this file is not a VDB : \"" +
+            filename + "\"\n";
+      }
+      return TINYVDBIO_ERROR_INVALID_FILE;
+    }
+
+    data.resize(sz);
+
+    ifs.seekg(0, ifs.beg);
+    ifs.read(reinterpret_cast<char *>(&data.at(0)),
+             static_cast<std::streamsize>(sz));
+  }
+
+  VDBStatus status = ParseVDBHeader(data.data(), data.size(), header, err);
+  return status;
+}
+
+static bool IsBigEndian(void) {
+  union {
+    unsigned int i;
+    char c[4];
+  } bint = {0x01020304};
+
+  return bint.c[0] == 1;
+}
+
+VDBStatus ParseVDBHeader(const unsigned char *data, const size_t len,
+                         VDBHeader *header, std::string *err) {
+  tinyvdb_int64 magic;
+
+  // OpenVDB stores data in little endian manner(e.g. x86).
+  // Swap bytes for big endian architecture(e.g. Power, SPARC)
+  bool swap_endian = IsBigEndian();
+
+  StreamReader sr(data, len, swap_endian);
 
   // [0:7] magic number
-  if (!ifs.read(reinterpret_cast<char *>(&magic), 8)) {
-    return EXIT_FAILURE;
+  if (!sr.read8(&magic)) {
+    if (err) {
+      (*err) = "Failed to read magic number.";
+    }
+    return TINYVDBIO_ERROR_INVALID_HEADER;
   }
-  swap8(&magic);
 
   if (magic == kOPENVDB_MAGIC) {
     std::cout << "bingo!" << std::endl;
+  } else {
+    if (err) {
+      (*err) = "Invalid magic number for VDB.";
+    }
+    return TINYVDBIO_ERROR_INVALID_HEADER;
   }
 
   // [8:11] version
-  unsigned int file_version;
-  if (!ifs.read(reinterpret_cast<char *>(&file_version),
-                sizeof(unsigned int))) {
-    return EXIT_FAILURE;
+  unsigned int file_version = 0;
+  if (!sr.read4(&file_version)) {
+    if (err) {
+      (*err) = "Failed to read file version.";
+    }
+    return TINYVDBIO_ERROR_INVALID_HEADER;
   }
 
   std::cout << "File version: " << file_version << std::endl;
 
+  if (file_version < OPENVDB_FILE_VERSION_SELECTIVE_COMPRESSION) {
+    if (err) {
+      (*err) =
+          "VDB file version earlier than "
+          "OPENVDB_FILE_VERSION_SELECTIVE_COMPRESSION(220) is not supported.";
+    }
+    return TINYVDBIO_ERROR_UNIMPLEMENTED;
+  }
+
   // Read the library version numbers (not stored prior to file format version
   // 211).
+  unsigned int major_version = 0;
+  unsigned int minor_version = 0;
   if (file_version >= 211) {
-    unsigned int version;
-    ifs.read(reinterpret_cast<char *>(&version), sizeof(unsigned int));
-    std::cout << "major version : " << version << std::endl;
-    ifs.read(reinterpret_cast<char *>(&version), sizeof(unsigned int));
-    std::cout << "minor version : " << version << std::endl;
+    sr.read4(&major_version);
+    std::cout << "major version : " << major_version << std::endl;
+    sr.read4(&minor_version);
+    std::cout << "minor version : " << minor_version << std::endl;
   }
 
   // Read the flag indicating whether the stream supports partial reading.
@@ -2129,9 +2316,17 @@ bool ParseVDBHeader(const std::string &filename, std::string *err) {
   // reading.)
   char has_grid_offsets = 0;
   if (file_version >= 212) {
-    ifs.read(&has_grid_offsets, sizeof(char));
+    sr.read1(&has_grid_offsets);
     std::cout << "InputHasGridOffsets = "
               << (has_grid_offsets ? " yes " : " no ") << std::endl;
+  }
+
+  if (!has_grid_offsets) {
+    // Unimplemened.
+    if (err) {
+      (*err) = "VDB withoput grid offset is not supported in TinyVDBIO.";
+    }
+    return TINYVDBIO_ERROR_UNIMPLEMENTED;
   }
 
   // 5) Read the flag that indicates whether data is compressed.
@@ -2141,59 +2336,188 @@ bool ParseVDBHeader(const std::string &filename, std::string *err) {
   //    // Prior to the introduction of Blosc, ZLIB was the default compression
   //    scheme. mCompression = (COMPRESS_ZIP | COMPRESS_ACTIVE_MASK);
   //}
-  char isCompressed = 0;
+  char is_compressed = 0;
   if (file_version >= OPENVDB_FILE_VERSION_SELECTIVE_COMPRESSION &&
       file_version < OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
-    ifs.read(&isCompressed, sizeof(char));
-    std::cout << "Compression : " << (isCompressed != 0 ? "zip" : "none")
+    sr.read1(&is_compressed);
+    std::cout << "Compression : " << (is_compressed != 0 ? "zip" : "none")
               << std::endl;
+    if (file_version >= OPENVDB_FILE_VERSION_BLOSC_COMPRESSION) {
+    }
   }
 
-  // 6) Read the 16-byte(128-bit) uuid.
+  // 6) Read uuid.
   if (file_version >= OPENVDB_FILE_VERSION_BOOST_UUID) {
     // ASCII UUID = 32 chars + 4 '-''s = 36 bytes.
     char uuid[36];
-    ifs.read(uuid, 36);
+    sr.read(36, 36, reinterpret_cast<unsigned char *>(uuid));
     std::string uuid_string = std::string(uuid, 36);
     // TODO(syoyo): Store UUID somewhere.
-    std::cout << "uuid: " << uuid_string << std::endl;
+    std::cout << "uuid ASCII: " << uuid_string << std::endl;
+    header->uuid = std::string(uuid, 36);
   } else {
     char uuid[16];
-    ifs.read(uuid, 16);
+    sr.read(16, 16, reinterpret_cast<unsigned char *>(uuid));
     // TODO(syoyo): Store UUID somewhere.
     std::cout << "uuid: " << uuid << std::endl;
+    header->uuid = std::string(uuid, 16);
   }
 
+  header->file_version = file_version;
+  header->major_version = major_version;
+  header->minor_version = minor_version;
+  // header->has_grid_offsets = has_grid_offsets;
+  header->is_compressed = is_compressed;
+  header->offset_to_data = sr.tell();
+
+  return TINYVDBIO_SUCCESS;
+}
+
+VDBStatus ReadGridDescriptors(const std::string &filename,
+                              const VDBHeader &header,
+                              std::map<std::string, GridDescriptor> *gd_map,
+                              std::string *err) {
+  std::vector<unsigned char> data;
   {
-    bool ret = ReadMeta(ifs);
+    std::ifstream ifs(filename.c_str(), std::ifstream::binary);
+    if (!ifs) {
+      if (err) {
+        (*err) = "File not found or cannot open file : " + filename;
+      }
+      return TINYVDBIO_ERROR_INVALID_FILE;
+    }
+
+    // TODO(syoyo): Use mmap
+    ifs.seekg(0, ifs.end);
+    size_t sz = static_cast<size_t>(ifs.tellg());
+    if (tinyvdb_int64(sz) < 0) {
+      // Looks reading directory, not a file.
+      if (err) {
+        (*err) += "Looks like filename is a directory : \"" + filename + "\"\n";
+      }
+      return TINYVDBIO_ERROR_INVALID_FILE;
+    }
+
+    if (sz < 16) {
+      // ???
+      if (err) {
+        (*err) +=
+            "File size too short. Looks like this file is not a VDB : \"" +
+            filename + "\"\n";
+      }
+      return TINYVDBIO_ERROR_INVALID_FILE;
+    }
+
+    data.resize(sz);
+
+    ifs.seekg(0, ifs.beg);
+    ifs.read(reinterpret_cast<char *>(&data.at(0)),
+             static_cast<std::streamsize>(sz));
+  }
+
+  VDBStatus status =
+      ReadGridDescriptors(data.data(), data.size(), header, gd_map, err);
+  return status;
+}
+
+VDBStatus ReadGridDescriptors(const unsigned char *data, const size_t data_len,
+                              const VDBHeader &header,
+                              std::map<std::string, GridDescriptor> *gd_map,
+                              std::string *err) {
+  bool swap_endian = IsBigEndian();
+  StreamReader sr(data, data_len, swap_endian);
+
+  if (!sr.seek_set(header.offset_to_data)) {
+    if (err) {
+      (*err) = "Failed to seek into data";
+    }
+    return TINYVDBIO_ERROR_INVALID_DATA;
+  }
+
+  // Read meta data.
+  {
+    bool ret = ReadMeta(&sr);
     std::cout << "meta: " << ret << std::endl;
   }
 
-  std::map<std::string, GridDescriptor> gd_map;
-
-  if (has_grid_offsets) {
-    ReadGridDescriptors(ifs, file_version, &gd_map);
-  } else {
+  if (!ReadGridDescriptors(&sr, header.file_version, gd_map)) {
+    if (err) {
+      (*err) = "Failed to read grid descriptors";
+    }
+    return TINYVDBIO_ERROR_INVALID_DATA;
   }
 
-  // fixme
-  std::map<std::string, GridDescriptor>::iterator it(gd_map.begin());
-  // std::map<std::string, GridDescriptor>::iterator itEnd(gd_map.end());
-
-  // for (; it != itEnd; it++) {
-  ReadGrid(ifs, file_version, it->second);
-  //}
-
-  return true;
+  return TINYVDBIO_SUCCESS;
 }
 
-bool ParseVDBHeader(const unsigned char *data, const size_t len,
+VDBStatus ReadGrids(const std::string &filename, const VDBHeader &header,
+                    const std::map<std::string, GridDescriptor> &gd_map,
                     std::string *err) {
-  (void)data;
-  (void)len;
-  (void)err;
+  std::vector<unsigned char> data;
+  {
+    std::ifstream ifs(filename.c_str(), std::ifstream::binary);
+    if (!ifs) {
+      if (err) {
+        (*err) = "File not found or cannot open file : " + filename;
+      }
+      return TINYVDBIO_ERROR_INVALID_FILE;
+    }
 
-  return false;
+    // TODO(syoyo): Use mmap
+    ifs.seekg(0, ifs.end);
+    size_t sz = static_cast<size_t>(ifs.tellg());
+    if (tinyvdb_int64(sz) < 0) {
+      // Looks reading directory, not a file.
+      if (err) {
+        (*err) += "Looks like filename is a directory : \"" + filename + "\"\n";
+      }
+      return TINYVDBIO_ERROR_INVALID_FILE;
+    }
+
+    if (sz < 16) {
+      // ???
+      if (err) {
+        (*err) +=
+            "File size too short. Looks like this file is not a VDB : \"" +
+            filename + "\"\n";
+      }
+      return TINYVDBIO_ERROR_INVALID_FILE;
+    }
+
+    data.resize(sz);
+
+    ifs.seekg(0, ifs.beg);
+    ifs.read(reinterpret_cast<char *>(&data.at(0)),
+             static_cast<std::streamsize>(sz));
+  }
+
+  VDBStatus status = ReadGrids(data.data(), data.size(), header, gd_map, err);
+  return status;
+}
+
+VDBStatus ReadGrids(const unsigned char *data, const size_t data_len,
+                    const VDBHeader &header,
+                    const std::map<std::string, GridDescriptor> &gd_map,
+                    std::string *err) {
+  bool swap_endian = IsBigEndian();
+  StreamReader sr(data, data_len, swap_endian);
+
+  std::map<std::string, GridDescriptor>::const_iterator it(gd_map.begin());
+  std::map<std::string, GridDescriptor>::const_iterator itEnd(gd_map.end());
+
+  for (; it != itEnd; it++) {
+    const GridDescriptor &gd = it->second;
+
+    sr.seek_set(tinyvdb_uint64(gd.GridPos()));
+
+    if (!ReadGrid(&sr, header.file_version, gd, err)) {
+      if (err) {
+        (*err) = "Failed to read Grid data.";
+      }
+    }
+  }
+
+  return TINYVDBIO_SUCCESS;
 }
 
 static bool WriteVDBHeader(std::ostream &os) {
@@ -2205,7 +2529,7 @@ static bool WriteVDBHeader(std::ostream &os) {
   unsigned int file_version = OPENVDB_FILE_VERSION_NEW_TRANSFORM;
   os.write(reinterpret_cast<char *>(&file_version), sizeof(unsigned int));
 
-#if 0
+#if 0  // TODO(syoyo): Implement
 
   std::cout << "File version: " << file_version << std::endl;
 
@@ -2289,6 +2613,10 @@ bool SaveVDB(const std::string &filename, std::string *err) {
 }
 
 }  // namespace tinyvdb
+
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
 #endif
 

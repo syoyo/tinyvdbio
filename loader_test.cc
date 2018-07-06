@@ -15,10 +15,30 @@ int main(int argc, char **argv)
     return EXIT_FAILURE;
   }
 
+  // 1. Parse VDB header
+  tinyvdb::VDBHeader header;
   std::string err;
-  bool ret = tinyvdb::ParseVDBHeader(argv[1], &err);
+  tinyvdb::VDBStatus status = tinyvdb::ParseVDBHeader(argv[1], &header, &err);
 
-  if (!ret) {
+  if (status != tinyvdb::TINYVDBIO_SUCCESS) {
+    if (!err.empty()) {
+      std::cerr << err << std::endl;
+    }
+  }
+
+  // 2. Read Grid descriptors
+  std::map<std::string, tinyvdb::GridDescriptor> gd_map;
+
+  status = tinyvdb::ReadGridDescriptors(argv[1], header, &gd_map, &err);
+  if (status != tinyvdb::TINYVDBIO_SUCCESS) {
+    if (!err.empty()) {
+      std::cerr << err << std::endl;
+    }
+  }
+
+  // 3. Read Grids
+  status = tinyvdb::ReadGrids(argv[1], header, gd_map, &err);
+  if (status != tinyvdb::TINYVDBIO_SUCCESS) {
     if (!err.empty()) {
       std::cerr << err << std::endl;
     }
