@@ -38,6 +38,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <bitset>
 
 namespace tinyvdb {
 
@@ -221,142 +222,6 @@ inline int32 FindHighestOn(int32 v) {
 
 ////////////////////////////////////////
 
-/// Base class for the bit mask iterators
-template <typename NodeMask>
-class BaseMaskIterator {
- protected:
-  int32 mPos;               // bit position
-  const NodeMask* mParent;  // this iterator can't change the parent_mask!
-
- public:
-  BaseMaskIterator() : mPos(NodeMask::SIZE), mParent(NULL) {}
-  // BaseMaskIterator(const BaseMaskIterator&) = default;
-  BaseMaskIterator(int32 pos, const NodeMask* parent)
-      : mPos(pos), mParent(parent) {
-    assert((parent == NULL && pos == 0) ||
-           (parent != NULL && pos <= NodeMask::SIZE));
-  }
-  bool operator==(const BaseMaskIterator& iter) const {
-    return mPos == iter.mPos;
-  }
-  bool operator!=(const BaseMaskIterator& iter) const {
-    return mPos != iter.mPos;
-  }
-  bool operator<(const BaseMaskIterator& iter) const {
-    return mPos < iter.mPos;
-  }
-  BaseMaskIterator& operator=(const BaseMaskIterator& iter) {
-    mPos = iter.mPos;
-    mParent = iter.mParent;
-    return *this;
-  }
-  int32 offset() const { return mPos; }
-  int32 pos() const { return mPos; }
-  bool test() const {
-    assert(mPos <= NodeMask::SIZE);
-    return (mPos != NodeMask::SIZE);
-  }
-  operator bool() const { return this->test(); }
-};  // class BaseMaskIterator
-
-#if 0
-
-/// @note This happens to be a const-iterator!
-template <typename NodeMask>
-class OnMaskIterator: public BaseMaskIterator<NodeMask>
-{
-private:
-    typedef BaseMaskIterator<NodeMask> BaseType;
-    //using BaseType = BaseMaskIterator<NodeMask>;
-    //using BaseType::mPos;//bit position;
-    //using BaseType::mParent;//this iterator can't change the parent_mask!
-public:
-    OnMaskIterator() : BaseType() {}
-    OnMaskIterator(int32 pos,const NodeMask *parent) : BaseType(pos,parent) {}
-    void increment()
-    {
-        assert(mParent != NULL);
-        mPos = mParent->findNextOn(mPos+1);
-        assert(mPos <= NodeMask::SIZE);
-    }
-    void increment(int n) { while(n-- && this->next()) ; }
-    bool next()
-    {
-        this->increment();
-        return this->test();
-    }
-    bool operator*() const {return true;}
-    OnMaskIterator& operator++()
-    {
-        this->increment();
-        return *this;
-    }
-}; // class OnMaskIterator
-
-
-template <typename NodeMask>
-class OffMaskIterator: public BaseMaskIterator<NodeMask>
-{
-private:
-    using BaseType = BaseMaskIterator<NodeMask>;
-    using BaseType::mPos;//bit position;
-    using BaseType::mParent;//this iterator can't change the parent_mask!
-public:
-    OffMaskIterator() : BaseType()  {}
-    OffMaskIterator(int32 pos,const NodeMask *parent) : BaseType(pos,parent) {}
-    void increment()
-    {
-        assert(mParent != NULL);
-        mPos=mParent->findNextOff(mPos+1);
-        assert(mPos <= NodeMask::SIZE);
-    }
-    void increment(int n) { while(n-- && this->next()) ; }
-    bool next()
-    {
-        this->increment();
-        return this->test();
-    }
-    bool operator*() const {return false;}
-    OffMaskIterator& operator++()
-    {
-        this->increment();
-        return *this;
-    }
-}; // class OffMaskIterator
-
-
-template <typename NodeMask>
-class DenseMaskIterator: public BaseMaskIterator<NodeMask>
-{
-private:
-    using BaseType = BaseMaskIterator<NodeMask>;
-    using BaseType::mPos;//bit position;
-    using BaseType::mParent;//this iterator can't change the parent_mask!
-
-public:
-    DenseMaskIterator() : BaseType() {}
-    DenseMaskIterator(int32 pos,const NodeMask *parent) : BaseType(pos,parent) {}
-    void increment()
-    {
-        assert(mParent != NULL);
-        mPos += 1;//careful - the increment might go beyond the end
-        assert(mPos<= NodeMask::SIZE);
-    }
-    void increment(int n) { while(n-- && this->next()) ; }
-    bool next()
-    {
-        this->increment();
-        return this->test();
-    }
-    bool operator*() const {return mParent->isOn(mPos);}
-    DenseMaskIterator& operator++()
-    {
-        this->increment();
-        return *this;
-    }
-}; // class DenseMaskIterator
-#endif
-
 
 // TODO(syoyo): remove
 
@@ -521,6 +386,7 @@ class NodeMask {
   }
   NodeMask operator&(const NodeMask& other) const {
     NodeMask m(*this);
+
     m &= other;
     return m;
   }
@@ -656,12 +522,8 @@ class NodeMask {
   void save(std::ostream& os) const {
     os.write(reinterpret_cast<const char*>(mWords.data()), this->memUsage());
   }
-  void load(StreamReader* sr) {
-    (void)sr;
-    // sr->read(this->memUsage(), this->memUsage(),
-    // reinterpret_cast<char*>(mWords.data()));
-    return;
-  }
+  void load(StreamReader* sr);
+
   void seek(std::istream& is) const {
     is.seekg(this->memUsage(), std::ios_base::cur);
   }
@@ -710,6 +572,21 @@ class NodeMask {
 };  // NodeMask
 
 #endif
+
+template<std::size_t N>
+class BitMask {
+ public:
+  BitMask() {}
+  ~BitMask() {}
+
+  ///
+  /// Loads bit mask value from stream reader.
+  ///
+  bool load(StreamReader *sr);
+
+ private:
+  std::bitset<N> mask_;
+};
 
 class GridDescriptor {
  public:
@@ -903,6 +780,7 @@ class NodeInfo {
 
 class InternalNode;
 
+#if 0 // TODO: remove
 // Assume `ValueT` is pod type(e.g. float).
 template <typename ValueT, typename ChildT>
 class NodeUnion {
@@ -929,6 +807,7 @@ class NodeUnion {
   ValueT &getValue() { return mValue; }
   void setValue(const ValueT &val) { mValue = val; }
 };
+#endif
 
 class Node {
  public:
@@ -937,6 +816,8 @@ class Node {
 
   virtual bool ReadTopology(StreamReader *sr, const bool half_precision,
                             const unsigned int file_version) = 0;
+
+  virtual bool ReadBuffer(StreamReader *sr, const bool half_precision, const unsigned int file_version) = 0;
 
  protected:
   NodeInfo node_info_;
@@ -952,7 +833,14 @@ class LeafNode : public Node {
   bool ReadTopology(StreamReader *sr, const bool half_precision,
                     const unsigned int file_version);
 
+  ///
+  /// Reads voxel data.
+  ///
+  bool ReadBuffer(StreamReader *sr, const bool half_precision, const unsigned int file_version);
+
  private:
+
+  std::vector<unsigned char> data_; // Leaf's voxel data.
 };
 
 LeafNode::~LeafNode() {}
@@ -964,6 +852,15 @@ bool LeafNode::ReadTopology(StreamReader *sr, const bool half_precision,
   (void)file_version;
 
   return false;
+}
+
+bool LeafNode::ReadBuffer(StreamReader *sr, const bool half_precision,
+                            const unsigned int file_version) {
+  (void)sr;
+  (void)half_precision;
+  (void)file_version;
+
+  return true;
 }
 
 ///
@@ -993,15 +890,20 @@ class InternalNode : public Node {
     origin_[0] = 0.0f;
     origin_[1] = 0.0f;
     origin_[2] = 0.0f;
+    node_values_.resize(child_mask_.memUsage());
   }
   ~InternalNode() {}
 
   bool ReadTopology(StreamReader *sr, const bool half_precision,
                     const unsigned int file_version);
 
+  bool ReadBuffer(StreamReader *sr, const bool half_precision,
+                    const unsigned int file_version);
+
  private:
   Node *child_node_;
   // NodeUnion<ValueType, InternalNode> nodes_[NUM_VALUES];
+  std::vector<ValueType> node_values_;
 
   NodeMask child_mask_;
   NodeMask value_mask_;
@@ -1014,17 +916,22 @@ class InternalNode : public Node {
 class RootNode : public Node {
  public:
   RootNode(const NodeInfo node_info, Node *child_node)
-      : Node(node_info), child_node_(child_node) {}
+      : Node(node_info), child_node_(child_node), num_tiles_(0), num_children_(0) {}
   ~RootNode() {}
 
   bool ReadTopology(StreamReader *sr, const bool half_precision,
                     const unsigned int file_version);
 
+  bool ReadBuffer(StreamReader *sr, const bool half_precision, const unsigned int file_version);
+
  private:
   Node *child_node_;
   Value background_;  // Background(region of un-interested area) value
+  unsigned int num_tiles_;
+  unsigned int num_children_;
 };
 
+#if 0
 ///
 /// Reader class for Tree data
 ///
@@ -1035,6 +942,7 @@ class TreeReader {
 
   bool Read(std::istream &is);
 };
+#endif
 
 #ifdef __clang__
 #pragma clang diagnostic pop
@@ -1114,6 +1022,12 @@ bool SaveVDB(const std::string &filename, std::string *err);
 
 #ifdef TINYVDBIO_IMPLEMENTATION
 
+#if !defined(TINYVDBIO_USE_SYSTEM_ZLIB)
+extern "C" {
+#include "miniz.h"
+}
+#endif
+
 #include <cassert>
 #include <iostream>  // HACK
 #include <sstream>
@@ -1130,25 +1044,18 @@ namespace tinyvdb {
 
 const int kOPENVDB_MAGIC = 0x56444220;
 
-// HACK
+#ifndef MINIZ_LITTLE_ENDIAN
 #define MINIZ_LITTLE_ENDIAN (1)
+#endif
 
 ///
 /// TinyVDB file version.
 ///
-const unsigned int kTINYVDB_FILE_VERSION = 222;
+const unsigned int kTINYVDB_FILE_VERSION = 220;
 
 // TODO(syoyo) Rewrite with TINYVDB_...
 /// Notable file format version numbers
 enum {
-  OPENVDB_FILE_VERSION_ROOTNODE_MAP = 213,
-  OPENVDB_FILE_VERSION_INTERNALNODE_COMPRESSION = 214,
-  OPENVDB_FILE_VERSION_SIMPLIFIED_GRID_TYPENAME = 215,
-  OPENVDB_FILE_VERSION_GRID_INSTANCING = 216,
-  OPENVDB_FILE_VERSION_BOOL_LEAF_OPTIMIZATION = 217,
-  OPENVDB_FILE_VERSION_BOOST_UUID = 218,
-  OPENVDB_FILE_VERSION_NO_GRIDMAP = 219,
-  OPENVDB_FILE_VERSION_NEW_TRANSFORM = 219,
   OPENVDB_FILE_VERSION_SELECTIVE_COMPRESSION = 220,
   OPENVDB_FILE_VERSION_FLOAT_FRUSTUM_BBOX = 221,
   OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION = 222,
@@ -1681,6 +1588,32 @@ static inline bool EndsWidth(std::string const &value,
   return std::equal(ending.rbegin(), ending.rend(), value.rbegin());
 }
 
+template<std::size_t N>
+bool BitMask<N>::load(StreamReader *sr)
+{
+  std::vector<unsigned char> buf(mask_.size() / 8);
+
+  sr->read(mask_.size(), mask_.size(), buf.data());
+
+  // Reconstruct bit mask
+  // TODO(syoyo): endian
+  for (size_t j = 0; j < mask_.size() / 8; j++) {
+    for (size_t i = 0; i < 8; i++) {
+      unsigned char bit = (buf[j] >> i) & 0x1;
+      mask_.set(j * 8 + i, bit);
+    }
+  }
+
+  return true;
+}
+
+void NodeMask::load(StreamReader* sr)
+{
+  sr->read(this->memUsage(), this->memUsage(), reinterpret_cast<unsigned char*>(mWords.data()));
+
+  return;
+}
+
 bool RootNode::ReadTopology(StreamReader *sr, const bool half_precision,
                             const unsigned int file_version) {
 
@@ -1691,20 +1624,18 @@ bool RootNode::ReadTopology(StreamReader *sr, const bool half_precision,
 
   std::cout << "background : " << background_ << ", size = " << GetValueTypeSize(node_info_.value_type()) << std::endl;
 
-  unsigned int num_tiles = 0;
-  unsigned int num_children = 0;
-  sr->read4(&num_tiles);
-  sr->read4(&num_children);
+  sr->read4(&num_tiles_);
+  sr->read4(&num_children_);
 
-  if ((num_tiles == 0) && (num_children == 0)) {
+  if ((num_tiles_ == 0) && (num_children_ == 0)) {
     return false;
   }
 
-  std::cout << "num_tiles " << num_tiles << std::endl;
-  std::cout << "num_children " << num_children << std::endl;
+  std::cout << "num_tiles " << num_tiles_ << std::endl;
+  std::cout << "num_children " << num_children_ << std::endl;
 
   // Read tiles.
-  for (unsigned int n = 0; n < num_tiles; n++) {
+  for (unsigned int n = 0; n < num_tiles_; n++) {
     int vec[3];
     Value value;
     bool active;
@@ -1721,7 +1652,7 @@ bool RootNode::ReadTopology(StreamReader *sr, const bool half_precision,
   }
 
   // Read child nodes.
-  for (unsigned int n = 0; n < num_children; n++) {
+  for (unsigned int n = 0; n < num_children_; n++) {
     int vec[3];
     sr->read4(&vec[0]);
     sr->read4(&vec[1]);
@@ -1735,6 +1666,19 @@ bool RootNode::ReadTopology(StreamReader *sr, const bool half_precision,
   }
 
   (void)file_version;
+
+  return true;
+}
+
+bool RootNode::ReadBuffer(StreamReader *sr, const bool half_precision,
+                            const unsigned int file_version) {
+
+  // Recursive call
+  for (size_t i = 0; i < num_children_; i++) {
+    if (!child_node_->ReadBuffer(sr, half_precision, file_version)) {
+      return false;
+    }
+  }
 
   return true;
 }
@@ -1753,20 +1697,22 @@ static bool ReadCompressedData(StreamReader *sr, unsigned char *dst_data,
     return false;
   } else {
     sr->read(element_size * count, element_size * count, dst_data);
-    if (element_size == 2) {
-      unsigned short *ptr = reinterpret_cast<unsigned short*>(dst_data);
-      for (size_t i = 0; i < count; i++) {
-        swap2(ptr + i);
-      }
-    } else if (element_size == 4) {
-      unsigned int *ptr = reinterpret_cast<unsigned int*>(dst_data);
-      for (size_t i = 0; i < count; i++) {
-        swap4(ptr + i);
-      }
-    } else if (element_size == 8) {
-      tinyvdb_uint64 *ptr = reinterpret_cast<tinyvdb_uint64*>(dst_data);
-      for (size_t i = 0; i < count; i++) {
-        swap8(ptr + i);
+    if (sr->swap_endian()) {
+      if (element_size == 2) {
+        unsigned short *ptr = reinterpret_cast<unsigned short*>(dst_data);
+        for (size_t i = 0; i < count; i++) {
+          swap2(ptr + i);
+        }
+      } else if (element_size == 4) {
+        unsigned int *ptr = reinterpret_cast<unsigned int*>(dst_data);
+        for (size_t i = 0; i < count; i++) {
+          swap4(ptr + i);
+        }
+      } else if (element_size == 8) {
+        tinyvdb_uint64 *ptr = reinterpret_cast<tinyvdb_uint64*>(dst_data);
+        for (size_t i = 0; i < count; i++) {
+          swap8(ptr + i);
+        }
       }
     }
     return true;
@@ -1857,7 +1803,9 @@ bool InternalNode::ReadTopology(StreamReader *sr, const bool half_precision,
   std::cout << "topo: buffer count offt = " << sr->tell() << std::endl;
 
   child_mask_.load(sr);
+  std::cout << "topo: child mask buffer count offt = " << sr->tell() << std::endl;
   value_mask_.load(sr);
+  std::cout << "topo: value mask buffer count offt = " << sr->tell() << std::endl;
 
   const bool old_version =
       file_version < OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION;
@@ -1866,6 +1814,7 @@ bool InternalNode::ReadTopology(StreamReader *sr, const bool half_precision,
       1 << (3 * node_info_
                     .log2dim());  // total voxel count represented by this node
 
+  // Older version will have less values
   const int num_values =
       (old_version ? int(child_mask_.countOff()) : NUM_VALUES);
 
@@ -1873,25 +1822,41 @@ bool InternalNode::ReadTopology(StreamReader *sr, const bool half_precision,
     std::vector<unsigned char> values;
     values.resize(GetValueTypeSize(node_info_.value_type()) *
                   size_t(num_values));
-#if 0  // TODO
-    if (!ReadCompressedValues(is, num_values, node_info_.value_type(), value_mask_, half_precision,
-                         &values)) {
+
+#if 0 // TODO
+    if (!ReadCompressedValues(sr, num_values, node_info_.value_type(), value_mask_, half_precision, &values)) {
       return false;
     }
+#endif
 
     // Copy values from the array into this node's table.
     if (old_version) {
-      // int n = 0;
-      // for (ValueAllIter iter = this->beginValueAll(); iter; ++iter) {
-      //    mNodes[iter.pos()].setValue(values[n++]);
-      //}
-      // assert(n == numValues);
+      assert(size_t(num_values) <= node_values_.size());
+
+      // loop over child flags is off.
+      int n = 0;
+      for (int32 i = 0; i < int32(NUM_VALUES); i++) {
+        if (child_mask_.isOff(i)) {
+          //mNodes[iter.pos()].setValue(values[n++]);
+          n++;
+        }
+      }
+      assert(n == num_values);
     } else {
-      // for (ValueAllIter iter = this->beginValueAll(); iter; ++iter) {
-      //    mNodes[iter.pos()].setValue(values[iter.pos()]);
-      //}
+      // loop over child flags is off.
+      for (int32 i = 0; i < int32(NUM_VALUES); i++) {
+        if (child_mask_.isOff(i)) {
+          //mNodes[iter.pos()].setValue(values[iter.pos());
+        }
+      }
     }
-#endif
+  }
+
+  // loop over child node
+  for (int32 i = 0; i < child_mask_.SIZE; i++) {
+    if (child_mask_.isOn(i)) {
+      std::cout << "child! " << i << std::endl;
+    }
   }
 
 #if 0
@@ -1902,6 +1867,16 @@ bool InternalNode::ReadTopology(StreamReader *sr, const bool half_precision,
       child->readTopology(is, half_precision);
   }
 #endif
+
+  return true;
+}
+
+bool InternalNode::ReadBuffer(StreamReader *sr, const bool half_precision,
+                              const unsigned int file_version) {
+  // TODO
+  (void)sr;
+  (void)half_precision;
+  (void)file_version;
 
   return true;
 }
@@ -1937,6 +1912,8 @@ std::string GridDescriptor::StripSuffix(const std::string &name) {
 
 bool GridDescriptor::Read(StreamReader *sr, const unsigned int file_version,
                           std::string *err) {
+  (void)file_version;
+
   unique_name_ = ReadString(sr);
   grid_name_ = StripSuffix(unique_name_);
 
@@ -1950,7 +1927,7 @@ bool GridDescriptor::Read(StreamReader *sr, const unsigned int file_version,
     grid_type_ = tmp;
   }
 
-  // FIXME(syoyo): Currently only `Tree_float_5_4_3` is supported.
+  // FIXME(syoyo): Currently only `Tree_float_5_4_3` type is supported.
   if (grid_type_.compare("Tree_float_5_4_3") != 0) {
     if (err) {
       (*err) = "Unsupported grid type: " + grid_type_;
@@ -1961,7 +1938,7 @@ bool GridDescriptor::Read(StreamReader *sr, const unsigned int file_version,
   std::cout << "grid_type = " << grid_type_ << std::endl;
   std::cout << "half = " << save_float_as_half_ << std::endl;
 
-  if (file_version >= OPENVDB_FILE_VERSION_GRID_INSTANCING) {
+  {
     instance_parent_name_ = ReadString(sr);
     std::cout << "instance_parent_name = " << instance_parent_name_
               << std::endl;
@@ -2350,7 +2327,7 @@ VDBStatus ParseVDBHeader(const unsigned char *data, const size_t len,
   }
 
   // 6) Read uuid.
-  if (file_version >= OPENVDB_FILE_VERSION_BOOST_UUID) {
+  {
     // ASCII UUID = 32 chars + 4 '-''s = 36 bytes.
     char uuid[36];
     sr.read(36, 36, reinterpret_cast<unsigned char *>(uuid));
@@ -2358,12 +2335,6 @@ VDBStatus ParseVDBHeader(const unsigned char *data, const size_t len,
     // TODO(syoyo): Store UUID somewhere.
     std::cout << "uuid ASCII: " << uuid_string << std::endl;
     header->uuid = std::string(uuid, 36);
-  } else {
-    char uuid[16];
-    sr.read(16, 16, reinterpret_cast<unsigned char *>(uuid));
-    // TODO(syoyo): Store UUID somewhere.
-    std::cout << "uuid: " << uuid << std::endl;
-    header->uuid = std::string(uuid, 16);
   }
 
   header->file_version = file_version;
@@ -2529,7 +2500,7 @@ static bool WriteVDBHeader(std::ostream &os) {
   os.write(reinterpret_cast<char *>(&magic), 8);
 
   // [8:11] version
-  unsigned int file_version = OPENVDB_FILE_VERSION_NEW_TRANSFORM;
+  unsigned int file_version = kTINYVDB_FILE_VERSION;
   os.write(reinterpret_cast<char *>(&file_version), sizeof(unsigned int));
 
 #if 0  // TODO(syoyo): Implement
