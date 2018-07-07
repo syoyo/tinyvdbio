@@ -357,6 +357,9 @@ public:
 }; // class DenseMaskIterator
 #endif
 
+
+// TODO(syoyo): remove
+
 /// @brief Bit mask for the internal and leaf nodes of VDB. This
 /// is a 64-bit implementation.
 ///
@@ -723,11 +726,11 @@ class GridDescriptor {
 
   bool SaveFloatAsHalf() const { return save_float_as_half_; }
 
-  tinyvdb_int64 GridPos() const { return grid_pos_; }
+  tinyvdb_uint64 GridPos() const { return grid_pos_; }
 
-  tinyvdb_int64 BlockPos() const { return block_pos_; }
+  tinyvdb_uint64 BlockPos() const { return block_pos_; }
 
-  tinyvdb_int64 EndPos() const { return end_pos_; }
+  tinyvdb_uint64 EndPos() const { return end_pos_; }
 
   static std::string AddSuffix(const std::string &name, int n);
   static std::string StripSuffix(const std::string &name);
@@ -745,9 +748,9 @@ class GridDescriptor {
   std::string grid_type_;
 
   bool save_float_as_half_;  // use fp16?
-  tinyvdb_int64 grid_pos_;
-  tinyvdb_int64 block_pos_;
-  tinyvdb_int64 end_pos_;
+  tinyvdb_uint64 grid_pos_;
+  tinyvdb_uint64 block_pos_;
+  tinyvdb_uint64 end_pos_;
 };
 
 typedef enum {
@@ -2061,7 +2064,7 @@ static bool ReadMeta(StreamReader *sr) {
 static bool ReadGridDescriptors(StreamReader *sr,
                                 const unsigned int file_version,
                                 std::map<std::string, GridDescriptor> *gd_map) {
-  // Read the number of metadata items.
+  // Read the number of grid descriptors.
   int count = 0;
   sr->read4(&count);
 
@@ -2080,7 +2083,7 @@ static bool ReadGridDescriptors(StreamReader *sr,
     (*gd_map)[gd.GridName()] = gd;
 
     // Skip forward to the next descriptor.
-    sr->seek_set(tinyvdb_uint64(gd.EndPos()));
+    sr->seek_set(gd.EndPos());
   }
 
   return true;
@@ -2508,7 +2511,7 @@ VDBStatus ReadGrids(const unsigned char *data, const size_t data_len,
   for (; it != itEnd; it++) {
     const GridDescriptor &gd = it->second;
 
-    sr.seek_set(tinyvdb_uint64(gd.GridPos()));
+    sr.seek_set(gd.GridPos());
 
     if (!ReadGrid(&sr, header.file_version, gd, err)) {
       if (err) {
