@@ -95,6 +95,7 @@ typedef enum {
 
 // forward decl.
 class StreamReader;
+class StreamWriter;
 
 #if 0
 template<int int, int Log2Dim>
@@ -221,6 +222,18 @@ inline int32 FindHighestOn(int32 v) {
 }
 
 ////////////////////////////////////////
+
+/// internal Per-node indicator byte that specifies what additional metadata
+/// is stored to permit reconstruction of inactive values
+enum {
+    /*0*/ NO_MASK_OR_INACTIVE_VALS,     // no inactive vals, or all inactive vals are +background
+    /*1*/ NO_MASK_AND_MINUS_BG,         // all inactive vals are -background
+    /*2*/ NO_MASK_AND_ONE_INACTIVE_VAL, // all inactive vals have the same non-background val
+    /*3*/ MASK_AND_NO_INACTIVE_VALS,    // mask selects between -background and +background
+    /*4*/ MASK_AND_ONE_INACTIVE_VAL,    // mask selects between backgd and one other inactive val
+    /*5*/ MASK_AND_TWO_INACTIVE_VALS,   // mask selects between two non-background inactive vals
+    /*6*/ NO_MASK_AND_ALL_VALS          // > 2 inactive vals, so no mask compression at all
+};
 
 
 // TODO(syoyo): remove
@@ -522,7 +535,7 @@ class NodeMask {
   void save(std::ostream& os) const {
     os.write(reinterpret_cast<const char*>(mWords.data()), this->memUsage());
   }
-  void load(StreamReader* sr);
+  bool load(StreamReader* sr);
 
   void seek(std::istream& is) const {
     is.seekg(this->memUsage(), std::ios_base::cur);
@@ -817,7 +830,7 @@ class Node {
   virtual bool ReadTopology(StreamReader *sr, const bool half_precision,
                             const unsigned int file_version) = 0;
 
-  virtual bool ReadBuffer(StreamReader *sr, const bool half_precision, const unsigned int file_version) = 0;
+  virtual bool ReadBuffer(StreamReader *sr, const unsigned char compresion_flags, const bool half_precision, const unsigned int file_version) = 0;
 
  protected:
   NodeInfo node_info_;
@@ -827,41 +840,63 @@ Node::~Node() {}
 
 class LeafNode : public Node {
  public:
-  LeafNode(const NodeInfo node_info) : Node(node_info) {}
+  LeafNode(const NodeInfo node_info) : Node(node_info),
+    value_mask_(node_info.log2dim()),
+    value_mask_end_pos_(0) {
+
+    num_voxels_ = 1 << (3 * node_info.log2dim());
+  }
+
   ~LeafNode();
 
   bool ReadTopology(StreamReader *sr, const bool half_precision,
                     const unsigned int file_version);
 
+  bool WriteTopology(StreamReader *sr, const bool half_precision,
+                    const unsigned int file_version);
+
   ///
   /// Reads voxel data.
   ///
-  bool ReadBuffer(StreamReader *sr, const bool half_precision, const unsigned int file_version);
+  bool ReadBuffer(StreamReader *sr, const unsigned char compression_flags, const bool half_precision, const unsigned int file_version);
 
  private:
 
+  NodeMask value_mask_; // Leaf's value mask
+
+  tinyvdb_uint64 value_mask_end_pos_; // offset to the end of value_mask(start of Leaf's buffer data)
+
   std::vector<unsigned char> data_; // Leaf's voxel data.
+  unsigned int num_voxels_;
 };
 
 LeafNode::~LeafNode() {}
 
 bool LeafNode::ReadTopology(StreamReader *sr, const bool half_precision,
                             const unsigned int file_version) {
-  (void)sr;
+
+  // not used.
   (void)half_precision;
   (void)file_version;
 
-  return false;
+  bool ret = value_mask_.load(sr);
+
+  return ret;
 }
 
-bool LeafNode::ReadBuffer(StreamReader *sr, const bool half_precision,
+#if 0 // TODO
+bool LeafNode::WriteTopology(StreamWriter *sr, const bool half_precision,
                             const unsigned int file_version) {
-  (void)sr;
+
+  // not used.
   (void)half_precision;
   (void)file_version;
 
-  return true;
+  bool ret = value_mask_.load(sr);
+
+  return ret;
 }
+#endif
 
 ///
 /// Internal node have `InternalNode` or `LeafNode` as children.
@@ -897,7 +932,9 @@ class InternalNode : public Node {
   bool ReadTopology(StreamReader *sr, const bool half_precision,
                     const unsigned int file_version);
 
-  bool ReadBuffer(StreamReader *sr, const bool half_precision,
+  bool ReadBuffer(StreamReader *sr, 
+                    const unsigned char compression_flags,
+                    const bool half_precision,
                     const unsigned int file_version);
 
  private:
@@ -922,7 +959,7 @@ class RootNode : public Node {
   bool ReadTopology(StreamReader *sr, const bool half_precision,
                     const unsigned int file_version);
 
-  bool ReadBuffer(StreamReader *sr, const bool half_precision, const unsigned int file_version);
+  bool ReadBuffer(StreamReader *sr, const unsigned char compression_flags, const bool half_precision, const unsigned int file_version);
 
  private:
   Node *child_node_;
@@ -1247,7 +1284,7 @@ static inline void swap8(tinyvdb::tinyvdb_int64 *val) {
 }
 
 ///
-/// Simple stream reder
+/// Simple stream reader
 ///
 class StreamReader {
  public:
@@ -1607,11 +1644,153 @@ bool BitMask<N>::load(StreamReader *sr)
   return true;
 }
 
-void NodeMask::load(StreamReader* sr)
-{
-  sr->read(this->memUsage(), this->memUsage(), reinterpret_cast<unsigned char*>(mWords.data()));
+static bool ReadAndDecompressData(StreamReader *sr, unsigned char *dst_data,
+                        size_t element_size, size_t count,
+                        unsigned int compression_mask) {
+  if (compression_mask & COMPRESS_BLOSC) {
+    // TODO(syoyo):
+    assert(0);
+    return false;
+  } else if (compression_mask & COMPRESS_ZIP) {
+    // TODO(syoyo):
+    assert(0);
+    return false;
+  } else {
+    sr->read(element_size * count, element_size * count, dst_data);
+    if (sr->swap_endian()) {
+      if (element_size == 2) {
+        unsigned short *ptr = reinterpret_cast<unsigned short*>(dst_data);
+        for (size_t i = 0; i < count; i++) {
+          swap2(ptr + i);
+        }
+      } else if (element_size == 4) {
+        unsigned int *ptr = reinterpret_cast<unsigned int*>(dst_data);
+        for (size_t i = 0; i < count; i++) {
+          swap4(ptr + i);
+        }
+      } else if (element_size == 8) {
+        tinyvdb_uint64 *ptr = reinterpret_cast<tinyvdb_uint64*>(dst_data);
+        for (size_t i = 0; i < count; i++) {
+          swap8(ptr + i);
+        }
+      }
+    }
+    return true;
+  }
+}
 
-  return;
+static bool Readalues(
+  StreamReader *sr,
+  const unsigned int compression_flags,
+  const bool half_precision,
+  size_t num_values,
+  ValueType value_type,
+  NodeMask value_mask,
+  std::vector<unsigned char> *values)
+{
+  // Advance stream position when destination buffer is null.
+  const bool seek = (values == NULL);
+
+  int read_count = num_values;
+
+  // read data.
+  // usually fp16 or fp32
+  if (seek) {
+    assert(0);
+  } else {
+    if (!ReadAndDecompressData(sr,
+      values->data(), GetValueTypeSize(value_type), size_t(read_count), compression_flags)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+static bool ReadMaskValues(
+  StreamReader *sr,
+  const unsigned int compression_flags,
+  const int file_version,
+  const bool half_precision,
+  size_t num_values,
+  ValueType value_type,
+  NodeMask value_mask,
+  std::vector<unsigned char> *values)
+{
+  // Advance stream position when destination buffer is null.
+  const bool seek = (values == NULL);
+
+  const bool mask_compressed = compression_flags & COMPRESS_ACTIVE_MASK;
+
+  char per_node_flag = NO_MASK_AND_ALL_VALS;
+  if (file_version >= OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
+    if (seek && !mask_compressed) {
+      // selection mask and/or inactive value is saved.
+      sr->seek_set(sr->tell() + 1); // advance 1 byte.
+    } else {
+      sr->read1(&per_node_flag);
+    }
+  }
+
+  if (per_node_flag == NO_MASK_AND_ONE_INACTIVE_VAL ||
+      per_node_flag == MASK_AND_ONE_INACTIVE_VAL ||
+      per_node_flag == MASK_AND_TWO_INACTIVE_VALS)
+  {
+    assert(0); // todo
+  }
+
+  NodeMask selection_mask(value_mask.LOG2DIM);
+  if (per_node_flag == MASK_AND_NO_INACTIVE_VALS ||
+      per_node_flag == MASK_AND_ONE_INACTIVE_VAL ||
+      per_node_flag == MASK_AND_TWO_INACTIVE_VALS)
+  {
+
+    assert(0); // todo
+  }
+
+  int read_count = num_values;
+
+  if (mask_compressed && per_node_flag != NO_MASK_AND_ALL_VALS
+      && file_version >= OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION)
+  {
+    read_count = int(value_mask.countOn());
+  }
+
+  // read data.
+  // usually fp16 or fp32
+  if (!ReadAndDecompressData(sr,
+    values->data(), GetValueTypeSize(value_type), size_t(read_count), compression_flags)) {
+    return false;
+  }
+
+  // If mask compression is enabled and the number of active values read into
+  // the temp buffer is smaller than the size of the destination buffer,
+  // then there are missing (inactive) values.
+  if (!seek && mask_compressed && read_count != num_values) {
+      // Restore inactive values, using the background value and, if available,
+      // the inside/outside mask.  (For fog volumes, the destination buffer is assumed
+      // to be initialized to background value zero, so inactive values can be ignored.)
+      for (int destIdx = 0, tempIdx = 0; destIdx < selection_mask.SIZE; ++destIdx) {
+          if (value_mask.isOn(int32(destIdx))) {
+              // Copy a saved active value into this node's buffer.
+              destBuf[destIdx] = tempBuf[tempIdx];
+              ++tempIdx;
+          } else {
+              // Reconstruct an unsaved inactive value and copy it into this node's buffer.
+              destBuf[destIdx] = (selection_mask.isOn(int32(destIdx)) ? inactiveVal1 : inactiveVal0);
+          }
+      }
+  }
+
+  return true;
+}
+
+
+bool NodeMask::load(StreamReader* sr)
+{
+  bool ret = sr->read(this->memUsage(), this->memUsage(), reinterpret_cast<unsigned char*>(mWords.data()));
+
+  return ret;
 }
 
 bool RootNode::ReadTopology(StreamReader *sr, const bool half_precision,
@@ -1665,17 +1844,17 @@ bool RootNode::ReadTopology(StreamReader *sr, const bool half_precision,
 #endif
   }
 
-  (void)file_version;
-
   return true;
 }
 
-bool RootNode::ReadBuffer(StreamReader *sr, const bool half_precision,
-                            const unsigned int file_version) {
+bool RootNode::ReadBuffer(StreamReader *sr,
+                          const unsigned char compression_flags,
+                          const bool half_precision,
+                          const unsigned int file_version) {
 
   // Recursive call
   for (size_t i = 0; i < num_children_; i++) {
-    if (!child_node_->ReadBuffer(sr, half_precision, file_version)) {
+    if (!child_node_->ReadBuffer(sr, compression_flags, half_precision, file_version)) {
       return false;
     }
   }
@@ -1683,105 +1862,40 @@ bool RootNode::ReadBuffer(StreamReader *sr, const bool half_precision,
   return true;
 }
 
-#if 0
-static bool ReadCompressedData(StreamReader *sr, unsigned char *dst_data,
-                        size_t element_size, size_t count,
-                        unsigned int compression_mask) {
-  if (compression_mask & COMPRESS_BLOSC) {
-    // TODO(syoyo):
-    assert(0);
-    return false;
-  } else if (compression_mask & COMPRESS_ZIP) {
-    // TODO(syoyo):
-    assert(0);
-    return false;
-  } else {
-    sr->read(element_size * count, element_size * count, dst_data);
-    if (sr->swap_endian()) {
-      if (element_size == 2) {
-        unsigned short *ptr = reinterpret_cast<unsigned short*>(dst_data);
-        for (size_t i = 0; i < count; i++) {
-          swap2(ptr + i);
-        }
-      } else if (element_size == 4) {
-        unsigned int *ptr = reinterpret_cast<unsigned int*>(dst_data);
-        for (size_t i = 0; i < count; i++) {
-          swap4(ptr + i);
-        }
-      } else if (element_size == 8) {
-        tinyvdb_uint64 *ptr = reinterpret_cast<tinyvdb_uint64*>(dst_data);
-        for (size_t i = 0; i < count; i++) {
-          swap8(ptr + i);
-        }
-      }
-    }
-    return true;
+bool LeafNode::ReadBuffer(StreamReader *sr,
+                          const unsigned char compression_flags,
+                          const bool half_precision,
+                          const unsigned int file_version) {
+  char num_buffers = 1;
+
+  // Seek over the value mask.
+  sr->seek_set(value_mask_end_pos_);
+
+  if (file_version < OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
+    int coord[3];
+
+    // Read coordinate origin and num buffers.
+    sr->read4(&coord[0]);
+    sr->read4(&coord[1]);
+    sr->read4(&coord[2]);
+
+    sr->read1(&num_buffers);
   }
+
+  // TODO(syoyo) clipBBox check.
+
+  assert(num_voxels_ > 0);
+
+  size_t data_len = num_voxels_ * sizeof(node_info_.value_type());
+  assert(data_len > 0);
+
+  data_.resize(data_len);
+
+  bool ret = ReadCompressedValues(sr, compression_flags, file_version, half_precision, num_voxels_, node_info_.value_type(), value_mask_, data_.data());
+
+  return ret;
 }
 
-static bool ReadCompressedValues(
-  StreamReader *sr,
-  const unsigned int compression_flags,
-  const int file_version,
-  size_t num_values,
-  ValueType value_type,
-  NodeMask value_mask,
-  const bool half_precision,
-  const Value &background,
-  std::vector<unsigned char> *values)
-{
-  const bool mask_compressed = compression_flags & COMPRESS_ACTIVE_MASK;
-
-  char metadata = 0;
-  if (file_version >= OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
-    sr->read1(&metadata);
-  }
-
-  // support 1(ZIP) or 2(ACTVE_MASK)
-  if ((compression_flags & COMPRESS_ZIP) ||
-      (compression_flags & COMPRESS_ACTIVE_MASK)) {
-    // ok
-  } else {
-    return false;
-  }
-
-  // resize buffer
-  std::vector<unsigned char> buf;
-
-  (void)num_values;
-  (void)mask_compressed;
-  (void)value_type;
-  (void)value_mask;
-  (void)half_precision;
-  (void)background;
-  (void)values;
-#if 0  // TODO
-  if (half_precision) {
-    ReadCompressedData(sr, buf.data(), sizeof(short), num_values, compression_flags);
-    // fp16 -> fp32
-    {
-      const unsigned short *fp16_ptr = src_values.data();
-      for (size_t i = 0; i < num_values; i++) {
-        FP16 fp16;
-        fp16.u = fp16_ptr[i];
-
-        FP32 fp32 = half_to_float(fp16);
-        src_data
-      }
-    }
-  } else {
-    ReadCompressedData(sr, values, GetValueTypeSize(value_type), num_values,
-                       compression_flags);
-  }
-
-  if (compression_flags & COMPRESS_ACTIVE_MASK) {
-    // Decompress mask.
-  }
-#endif
-
-  return false;
-}
-#endif
 
 bool InternalNode::ReadTopology(StreamReader *sr, const bool half_precision,
                                 const unsigned int file_version) {
