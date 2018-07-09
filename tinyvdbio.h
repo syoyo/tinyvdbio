@@ -31,6 +31,7 @@
 #ifndef TINY_VDB_IO_H_
 #define TINY_VDB_IO_H_
 
+#include <bitset>
 #include <cassert>
 #include <cstring>
 #include <fstream>
@@ -38,7 +39,6 @@
 #include <map>
 #include <string>
 #include <vector>
-#include <bitset>
 
 namespace tinyvdb {
 
@@ -96,6 +96,7 @@ typedef enum {
 // forward decl.
 class StreamReader;
 class StreamWriter;
+struct DeserializeParams;
 
 #if 0
 template<int int, int Log2Dim>
@@ -226,15 +227,20 @@ inline int32 FindHighestOn(int32 v) {
 /// internal Per-node indicator byte that specifies what additional metadata
 /// is stored to permit reconstruction of inactive values
 enum {
-    /*0*/ NO_MASK_OR_INACTIVE_VALS,     // no inactive vals, or all inactive vals are +background
-    /*1*/ NO_MASK_AND_MINUS_BG,         // all inactive vals are -background
-    /*2*/ NO_MASK_AND_ONE_INACTIVE_VAL, // all inactive vals have the same non-background val
-    /*3*/ MASK_AND_NO_INACTIVE_VALS,    // mask selects between -background and +background
-    /*4*/ MASK_AND_ONE_INACTIVE_VAL,    // mask selects between backgd and one other inactive val
-    /*5*/ MASK_AND_TWO_INACTIVE_VALS,   // mask selects between two non-background inactive vals
-    /*6*/ NO_MASK_AND_ALL_VALS          // > 2 inactive vals, so no mask compression at all
+  /*0*/ NO_MASK_OR_INACTIVE_VALS,  // no inactive vals, or all inactive vals are
+                                   // +background
+  /*1*/ NO_MASK_AND_MINUS_BG,      // all inactive vals are -background
+  /*2*/ NO_MASK_AND_ONE_INACTIVE_VAL,  // all inactive vals have the same
+                                       // non-background val
+  /*3*/ MASK_AND_NO_INACTIVE_VALS,     // mask selects between -background and
+                                       // +background
+  /*4*/ MASK_AND_ONE_INACTIVE_VAL,  // mask selects between backgd and one other
+                                    // inactive val
+  /*5*/ MASK_AND_TWO_INACTIVE_VALS,  // mask selects between two non-background
+                                     // inactive vals
+  /*6*/ NO_MASK_AND_ALL_VALS  // > 2 inactive vals, so no mask compression at
+                              // all
 };
-
 
 // TODO(syoyo): remove
 
@@ -293,11 +299,11 @@ class NodeMask {
     this->set(on);
   }
   /// Copy constructor
-  NodeMask(const NodeMask& other) { *this = other; }
+  NodeMask(const NodeMask &other) { *this = other; }
   /// Destructor
   ~NodeMask() {}
   /// Assignment operator
-  NodeMask& operator=(const NodeMask& other) {
+  NodeMask &operator=(const NodeMask &other) {
     mWords = other.mWords;
     return *this;
     // int32 n = WORD_COUNT;
@@ -318,7 +324,7 @@ class NodeMask {
     DenseIterator endDense() const   { return DenseIterator(SIZE,this); }
 #endif
 
-  bool operator==(const NodeMask& other) const {
+  bool operator==(const NodeMask &other) const {
     int n = int(WORD_COUNT);
     for (const Word *w1 = mWords.data(), *w2 = other.mWords.data();
          n-- && *w1++ == *w2++;)
@@ -326,7 +332,7 @@ class NodeMask {
     return n == -1;
   }
 
-  bool operator!=(const NodeMask& other) const { return !(*this == other); }
+  bool operator!=(const NodeMask &other) const { return !(*this == other); }
 
   //
   // Bitwise logical operations
@@ -340,24 +346,24 @@ class NodeMask {
   /// };
   /// @endcode
   template <typename WordOp>
-  const NodeMask& foreach (const NodeMask& other, const WordOp& op) {
-    Word* w1 = mWords.data();
-    const Word* w2 = other.mWords.data();
+  const NodeMask &foreach (const NodeMask &other, const WordOp &op) {
+    Word *w1 = mWords.data();
+    const Word *w2 = other.mWords.data();
     for (int32 n = WORD_COUNT; n--; ++w1, ++w2) op(*w1, *w2);
     return *this;
   }
   template <typename WordOp>
-  const NodeMask& foreach (const NodeMask& other1, const NodeMask& other2,
-                           const WordOp& op) {
-    Word* w1 = mWords.data();
+  const NodeMask &foreach (const NodeMask &other1, const NodeMask &other2,
+                           const WordOp &op) {
+    Word *w1 = mWords.data();
     const Word *w2 = other1.mWords.data(), *w3 = other2.mWords.data();
     for (int32 n = WORD_COUNT; n--; ++w1, ++w2, ++w3) op(*w1, *w2, *w3);
     return *this;
   }
   template <typename WordOp>
-  const NodeMask& foreach (const NodeMask& other1, const NodeMask& other2,
-                           const NodeMask& other3, const WordOp& op) {
-    Word* w1 = mWords.data();
+  const NodeMask &foreach (const NodeMask &other1, const NodeMask &other2,
+                           const NodeMask &other3, const WordOp &op) {
+    Word *w1 = mWords.data();
     const Word *w2 = other1.mWords.data(), *w3 = other2.mWords.data(),
                *w4 = other3.mWords.data();
     for (int32 n = WORD_COUNT; n--; ++w1, ++w2, ++w3, ++w4)
@@ -365,30 +371,30 @@ class NodeMask {
     return *this;
   }
   /// @brief Bitwise intersection
-  const NodeMask& operator&=(const NodeMask& other) {
-    Word* w1 = mWords.data();
-    const Word* w2 = other.mWords.data();
+  const NodeMask &operator&=(const NodeMask &other) {
+    Word *w1 = mWords.data();
+    const Word *w2 = other.mWords.data();
     for (int32 n = WORD_COUNT; n--; ++w1, ++w2) *w1 &= *w2;
     return *this;
   }
   /// @brief Bitwise union
-  const NodeMask& operator|=(const NodeMask& other) {
-    Word* w1 = mWords.data();
-    const Word* w2 = other.mWords.data();
+  const NodeMask &operator|=(const NodeMask &other) {
+    Word *w1 = mWords.data();
+    const Word *w2 = other.mWords.data();
     for (int32 n = WORD_COUNT; n--; ++w1, ++w2) *w1 |= *w2;
     return *this;
   }
   /// @brief Bitwise difference
-  const NodeMask& operator-=(const NodeMask& other) {
-    Word* w1 = mWords.data();
-    const Word* w2 = other.mWords.data();
+  const NodeMask &operator-=(const NodeMask &other) {
+    Word *w1 = mWords.data();
+    const Word *w2 = other.mWords.data();
     for (int32 n = WORD_COUNT; n--; ++w1, ++w2) *w1 &= ~*w2;
     return *this;
   }
   /// @brief Bitwise XOR
-  const NodeMask& operator^=(const NodeMask& other) {
-    Word* w1 = mWords.data();
-    const Word* w2 = other.mWords.data();
+  const NodeMask &operator^=(const NodeMask &other) {
+    Word *w1 = mWords.data();
+    const Word *w2 = other.mWords.data();
     for (int32 n = WORD_COUNT; n--; ++w1, ++w2) *w1 ^= *w2;
     return *this;
   }
@@ -397,18 +403,18 @@ class NodeMask {
     m.toggle();
     return m;
   }
-  NodeMask operator&(const NodeMask& other) const {
+  NodeMask operator&(const NodeMask &other) const {
     NodeMask m(*this);
 
     m &= other;
     return m;
   }
-  NodeMask operator|(const NodeMask& other) const {
+  NodeMask operator|(const NodeMask &other) const {
     NodeMask m(*this);
     m |= other;
     return m;
   }
-  NodeMask operator^(const NodeMask& other) const {
+  NodeMask operator^(const NodeMask &other) const {
     NodeMask m(*this);
     m ^= other;
     return m;
@@ -421,7 +427,7 @@ class NodeMask {
   /// Return the total number of on bits
   int32 countOn() const {
     int32 sum = 0, n = WORD_COUNT;
-    for (const Word* w = mWords.data(); n--; ++w) sum += CountOn(*w);
+    for (const Word *w = mWords.data(); n--; ++w) sum += CountOn(*w);
     return sum;
   }
   /// Return the total number of on bits
@@ -442,17 +448,17 @@ class NodeMask {
   void set(bool on) {
     const Word state = on ? ~Word(0) : Word(0);
     int32 n = WORD_COUNT;
-    for (Word* w = mWords.data(); n--; ++w) *w = state;
+    for (Word *w = mWords.data(); n--; ++w) *w = state;
   }
   /// Set all bits on
   void setOn() {
     int32 n = WORD_COUNT;
-    for (Word* w = mWords.data(); n--; ++w) *w = ~Word(0);
+    for (Word *w = mWords.data(); n--; ++w) *w = ~Word(0);
   }
   /// Set all bits off
   void setOff() {
     int32 n = WORD_COUNT;
-    for (Word* w = mWords.data(); n--; ++w) *w = Word(0);
+    for (Word *w = mWords.data(); n--; ++w) *w = Word(0);
   }
   /// Toggle the state of the <i>n</i>th bit
   void toggle(int32 n) {
@@ -462,7 +468,7 @@ class NodeMask {
   /// Toggle the state of all bits in the mask
   void toggle() {
     int32 n = WORD_COUNT;
-    for (Word* w = mWords.data(); n--; ++w) *w = ~*w;
+    for (Word *w = mWords.data(); n--; ++w) *w = ~*w;
   }
   /// Set the first bit on
   void setFirstOn() { this->setOn(0); }
@@ -482,21 +488,21 @@ class NodeMask {
   /// Return @c true if all the bits are on
   bool isOn() const {
     int n = int(WORD_COUNT);
-    for (const Word* w = mWords.data(); n-- && *w++ == ~Word(0);)
+    for (const Word *w = mWords.data(); n-- && *w++ == ~Word(0);)
       ;
     return n == -1;
   }
   /// Return @c true if all the bits are off
   bool isOff() const {
     int n = int(WORD_COUNT);
-    for (const Word* w = mWords.data(); n-- && *w++ == Word(0);)
+    for (const Word *w = mWords.data(); n-- && *w++ == Word(0);)
       ;
     return n == -1;
   }
   /// Return @c true if bits are either all off OR all on.
   /// @param isOn Takes on the values of all bits if the method
   /// returns true - else it is undefined.
-  bool isConstant(bool& isOn) const {
+  bool isConstant(bool &isOn) const {
     isOn = (mWords[0] == ~Word(0));  // first word has all bits on
     if (!isOn && mWords[0] != Word(0)) return false;  // early out
     const Word *w = mWords.data() + 1, *n = mWords.data() + WORD_COUNT;
@@ -505,14 +511,14 @@ class NodeMask {
   }
   int32 findFirstOn() const {
     int32 n = 0;
-    const Word* w = mWords.data();
+    const Word *w = mWords.data();
     for (; n < WORD_COUNT && !*w; ++w, ++n)
       ;
     return n == WORD_COUNT ? SIZE : (n << 6) + FindLowestOn(*w);
   }
   int32 findFirstOff() const {
     int32 n = 0;
-    const Word* w = mWords.data();
+    const Word *w = mWords.data();
     for (; n < WORD_COUNT && !~*w; ++w, ++n)
       ;
     return n == WORD_COUNT ? SIZE : (n << 6) + FindLowestOn(~*w);
@@ -523,29 +529,29 @@ class NodeMask {
   template <typename WordT>
   WordT getWord(int n) const {
     assert(n * 8 * sizeof(WordT) < SIZE);
-    return reinterpret_cast<const WordT*>(mWords)[n];
+    return reinterpret_cast<const WordT *>(mWords)[n];
   }
   template <typename WordT>
-  WordT& getWord(int n) {
+  WordT &getWord(int n) {
     assert(n * 8 * sizeof(WordT) < SIZE);
-    return reinterpret_cast<WordT*>(mWords)[n];
+    return reinterpret_cast<WordT *>(mWords)[n];
   }
   //@}
 
-  void save(std::ostream& os) const {
-    os.write(reinterpret_cast<const char*>(mWords.data()), this->memUsage());
+  void save(std::ostream &os) const {
+    os.write(reinterpret_cast<const char *>(mWords.data()), this->memUsage());
   }
-  bool load(StreamReader* sr);
+  bool load(StreamReader *sr);
 
-  void seek(std::istream& is) const {
+  void seek(std::istream &is) const {
     is.seekg(this->memUsage(), std::ios_base::cur);
   }
   /// @brief simple print method for debugging
-  void printInfo(std::ostream& os = std::cout) const {
+  void printInfo(std::ostream &os = std::cout) const {
     os << "NodeMask: Dim=" << DIM << " Log2Dim=" << LOG2DIM
        << " Bit count=" << SIZE << " word count=" << WORD_COUNT << std::endl;
   }
-  void printBits(std::ostream& os = std::cout, int32 max_out = 80u) const {
+  void printBits(std::ostream &os = std::cout, int32 max_out = 80u) const {
     const int32 n = (SIZE > max_out ? max_out : SIZE);
     for (int32 i = 0; i < n; ++i) {
       if (!(i & 63))
@@ -556,7 +562,7 @@ class NodeMask {
     }
     os << "|" << std::endl;
   }
-  void printAll(std::ostream& os = std::cout, int32 max_out = 80u) const {
+  void printAll(std::ostream &os = std::cout, int32 max_out = 80u) const {
     this->printInfo(os);
     this->printBits(os, max_out);
   }
@@ -586,7 +592,7 @@ class NodeMask {
 
 #endif
 
-template<std::size_t N>
+template <std::size_t N>
 class BitMask {
  public:
   BitMask() {}
@@ -774,6 +780,23 @@ static std::ostream &operator<<(std::ostream &os, const Value &value) {
   return os;
 }
 
+static Value Negate(const Value &value) {
+  if (value.Type() == VALUE_TYPE_NULL) {
+    return value;
+  } else if (value.Type() == VALUE_TYPE_BOOL) {
+    return Value(value.Get<bool>() ? false : true);
+  } else if (value.Type() == VALUE_TYPE_FLOAT) {
+    return Value(-value.Get<float>());
+  } else if (value.Type() == VALUE_TYPE_INT) {
+    return Value(-value.Get<int>());
+  } else if (value.Type() == VALUE_TYPE_DOUBLE) {
+    return Value(-value.Get<double>());
+  }
+
+  // ???
+  return value;
+}
+
 class NodeInfo {
  public:
   NodeInfo(NodeType node_type, ValueType value_type, int32 log2dim)
@@ -793,7 +816,7 @@ class NodeInfo {
 
 class InternalNode;
 
-#if 0 // TODO: remove
+#if 0  // TODO: remove
 // Assume `ValueT` is pod type(e.g. float).
 template <typename ValueT, typename ChildT>
 class NodeUnion {
@@ -827,10 +850,11 @@ class Node {
   Node(NodeInfo node_info) : node_info_(node_info) {}
   virtual ~Node();
 
-  virtual bool ReadTopology(StreamReader *sr, const bool half_precision,
-                            const unsigned int file_version) = 0;
+  virtual bool ReadTopology(StreamReader *sr,
+                            const DeserializeParams &params) = 0;
 
-  virtual bool ReadBuffer(StreamReader *sr, const unsigned char compresion_flags, const bool half_precision, const unsigned int file_version) = 0;
+  virtual bool ReadBuffer(StreamReader *sr,
+                          const DeserializeParams &params) = 0;
 
  protected:
   NodeInfo node_info_;
@@ -840,51 +864,47 @@ Node::~Node() {}
 
 class LeafNode : public Node {
  public:
-  LeafNode(const NodeInfo node_info) : Node(node_info),
-    value_mask_(node_info.log2dim()),
-    value_mask_end_pos_(0) {
-
+  LeafNode(const NodeInfo node_info)
+      : Node(node_info),
+        value_mask_(node_info.log2dim()),
+        value_mask_end_pos_(0) {
     num_voxels_ = 1 << (3 * node_info.log2dim());
   }
 
   ~LeafNode();
 
-  bool ReadTopology(StreamReader *sr, const bool half_precision,
-                    const unsigned int file_version);
+  bool ReadTopology(StreamReader *sr, const DeserializeParams &params);
 
-  bool WriteTopology(StreamReader *sr, const bool half_precision,
-                    const unsigned int file_version);
+  // bool WriteTopology(StreamReader *sr, const bool half_precision,
+  //                   const unsigned int file_version);
 
   ///
   /// Reads voxel data.
   ///
-  bool ReadBuffer(StreamReader *sr, const unsigned char compression_flags, const bool half_precision, const unsigned int file_version);
+  bool ReadBuffer(StreamReader *sr, const DeserializeParams &params);
 
  private:
+  NodeMask value_mask_;  // Leaf's value mask
 
-  NodeMask value_mask_; // Leaf's value mask
+  tinyvdb_uint64 value_mask_end_pos_;  // offset to the end of value_mask(start
+                                       // of Leaf's buffer data)
 
-  tinyvdb_uint64 value_mask_end_pos_; // offset to the end of value_mask(start of Leaf's buffer data)
-
-  std::vector<unsigned char> data_; // Leaf's voxel data.
+  std::vector<unsigned char> data_;  // Leaf's voxel data.
   unsigned int num_voxels_;
 };
 
 LeafNode::~LeafNode() {}
 
-bool LeafNode::ReadTopology(StreamReader *sr, const bool half_precision,
-                            const unsigned int file_version) {
-
+bool LeafNode::ReadTopology(StreamReader *sr, const DeserializeParams &params) {
   // not used.
-  (void)half_precision;
-  (void)file_version;
+  (void)params;
 
   bool ret = value_mask_.load(sr);
 
   return ret;
 }
 
-#if 0 // TODO
+#if 0  // TODO
 bool LeafNode::WriteTopology(StreamWriter *sr, const bool half_precision,
                             const unsigned int file_version) {
 
@@ -926,16 +946,13 @@ class InternalNode : public Node {
     origin_[1] = 0.0f;
     origin_[2] = 0.0f;
     node_values_.resize(child_mask_.memUsage());
+    (void)child_node_;
   }
   ~InternalNode() {}
 
-  bool ReadTopology(StreamReader *sr, const bool half_precision,
-                    const unsigned int file_version);
+  bool ReadTopology(StreamReader *sr, const DeserializeParams &parms);
 
-  bool ReadBuffer(StreamReader *sr, 
-                    const unsigned char compression_flags,
-                    const bool half_precision,
-                    const unsigned int file_version);
+  bool ReadBuffer(StreamReader *sr, const DeserializeParams &params);
 
  private:
   Node *child_node_;
@@ -953,13 +970,15 @@ class InternalNode : public Node {
 class RootNode : public Node {
  public:
   RootNode(const NodeInfo node_info, Node *child_node)
-      : Node(node_info), child_node_(child_node), num_tiles_(0), num_children_(0) {}
+      : Node(node_info),
+        child_node_(child_node),
+        num_tiles_(0),
+        num_children_(0) {}
   ~RootNode() {}
 
-  bool ReadTopology(StreamReader *sr, const bool half_precision,
-                    const unsigned int file_version);
+  bool ReadTopology(StreamReader *sr, const DeserializeParams &parms);
 
-  bool ReadBuffer(StreamReader *sr, const unsigned char compression_flags, const bool half_precision, const unsigned int file_version);
+  bool ReadBuffer(StreamReader *sr, const DeserializeParams &params);
 
  private:
   Node *child_node_;
@@ -1545,6 +1564,14 @@ static inline std::string ReadString(std::istream &is) {
 }
 #endif
 
+struct DeserializeParams {
+  unsigned int file_version;
+  unsigned char compression_flags;
+  bool half_precision;
+  char __pad__[2];
+  Value background;
+};
+
 static inline std::string ReadString(StreamReader *sr) {
   unsigned int size = 0;
   sr->read4(&size);
@@ -1625,9 +1652,8 @@ static inline bool EndsWidth(std::string const &value,
   return std::equal(ending.rbegin(), ending.rend(), value.rbegin());
 }
 
-template<std::size_t N>
-bool BitMask<N>::load(StreamReader *sr)
-{
+template <std::size_t N>
+bool BitMask<N>::load(StreamReader *sr) {
   std::vector<unsigned char> buf(mask_.size() / 8);
 
   sr->read(mask_.size(), mask_.size(), buf.data());
@@ -1645,8 +1671,8 @@ bool BitMask<N>::load(StreamReader *sr)
 }
 
 static bool ReadAndDecompressData(StreamReader *sr, unsigned char *dst_data,
-                        size_t element_size, size_t count,
-                        unsigned int compression_mask) {
+                                  size_t element_size, size_t count,
+                                  unsigned int compression_mask) {
   if (compression_mask & COMPRESS_BLOSC) {
     // TODO(syoyo):
     assert(0);
@@ -1656,22 +1682,27 @@ static bool ReadAndDecompressData(StreamReader *sr, unsigned char *dst_data,
     assert(0);
     return false;
   } else {
-    sr->read(element_size * count, element_size * count, dst_data);
-    if (sr->swap_endian()) {
-      if (element_size == 2) {
-        unsigned short *ptr = reinterpret_cast<unsigned short*>(dst_data);
-        for (size_t i = 0; i < count; i++) {
-          swap2(ptr + i);
-        }
-      } else if (element_size == 4) {
-        unsigned int *ptr = reinterpret_cast<unsigned int*>(dst_data);
-        for (size_t i = 0; i < count; i++) {
-          swap4(ptr + i);
-        }
-      } else if (element_size == 8) {
-        tinyvdb_uint64 *ptr = reinterpret_cast<tinyvdb_uint64*>(dst_data);
-        for (size_t i = 0; i < count; i++) {
-          swap8(ptr + i);
+    if (dst_data == NULL) {
+      // seek over this data.
+      sr->seek_set(sr->tell() + element_size * count);
+    } else {
+      sr->read(element_size * count, element_size * count, dst_data);
+      if (sr->swap_endian()) {
+        if (element_size == 2) {
+          unsigned short *ptr = reinterpret_cast<unsigned short *>(dst_data);
+          for (size_t i = 0; i < count; i++) {
+            swap2(ptr + i);
+          }
+        } else if (element_size == 4) {
+          unsigned int *ptr = reinterpret_cast<unsigned int *>(dst_data);
+          for (size_t i = 0; i < count; i++) {
+            swap4(ptr + i);
+          }
+        } else if (element_size == 8) {
+          tinyvdb_uint64 *ptr = reinterpret_cast<tinyvdb_uint64 *>(dst_data);
+          for (size_t i = 0; i < count; i++) {
+            swap8(ptr + i);
+          }
         }
       }
     }
@@ -1679,27 +1710,21 @@ static bool ReadAndDecompressData(StreamReader *sr, unsigned char *dst_data,
   }
 }
 
-static bool Readalues(
-  StreamReader *sr,
-  const unsigned int compression_flags,
-  const bool half_precision,
-  size_t num_values,
-  ValueType value_type,
-  NodeMask value_mask,
-  std::vector<unsigned char> *values)
-{
+static bool ReadValues(StreamReader *sr, const unsigned int compression_flags,
+                       size_t num_values, ValueType value_type,
+                       std::vector<unsigned char> *values) {
+  // usually fp16 or fp32
+  assert((value_type == VALUE_TYPE_FLOAT) || (value_type == VALUE_TYPE_HALF));
+
   // Advance stream position when destination buffer is null.
   const bool seek = (values == NULL);
 
-  int read_count = num_values;
-
   // read data.
-  // usually fp16 or fp32
   if (seek) {
     assert(0);
   } else {
-    if (!ReadAndDecompressData(sr,
-      values->data(), GetValueTypeSize(value_type), size_t(read_count), compression_flags)) {
+    if (!ReadAndDecompressData(sr, values->data(), GetValueTypeSize(value_type),
+                               num_values, compression_flags)) {
       return false;
     }
   }
@@ -1707,16 +1732,12 @@ static bool Readalues(
   return true;
 }
 
-static bool ReadMaskValues(
-  StreamReader *sr,
-  const unsigned int compression_flags,
-  const int file_version,
-  const bool half_precision,
-  size_t num_values,
-  ValueType value_type,
-  NodeMask value_mask,
-  std::vector<unsigned char> *values)
-{
+static bool ReadMaskValues(StreamReader *sr,
+                           const unsigned int compression_flags,
+                           const unsigned int file_version, const Value background,
+                           size_t num_values, ValueType value_type,
+                           NodeMask value_mask,
+                           std::vector<unsigned char> *values) {
   // Advance stream position when destination buffer is null.
   const bool seek = (values == NULL);
 
@@ -1726,40 +1747,42 @@ static bool ReadMaskValues(
   if (file_version >= OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
     if (seek && !mask_compressed) {
       // selection mask and/or inactive value is saved.
-      sr->seek_set(sr->tell() + 1); // advance 1 byte.
+      sr->seek_set(sr->tell() + 1);  // advance 1 byte.
     } else {
       sr->read1(&per_node_flag);
     }
   }
 
+  Value inactiveVal1 = background;
+  Value inactiveVal0 =
+      ((per_node_flag == NO_MASK_OR_INACTIVE_VALS) ? background
+                                                   : Negate(background));
+
   if (per_node_flag == NO_MASK_AND_ONE_INACTIVE_VAL ||
       per_node_flag == MASK_AND_ONE_INACTIVE_VAL ||
-      per_node_flag == MASK_AND_TWO_INACTIVE_VALS)
-  {
-    assert(0); // todo
+      per_node_flag == MASK_AND_TWO_INACTIVE_VALS) {
+    assert(0);  // todo
   }
 
   NodeMask selection_mask(value_mask.LOG2DIM);
   if (per_node_flag == MASK_AND_NO_INACTIVE_VALS ||
       per_node_flag == MASK_AND_ONE_INACTIVE_VAL ||
-      per_node_flag == MASK_AND_TWO_INACTIVE_VALS)
-  {
-
-    assert(0); // todo
+      per_node_flag == MASK_AND_TWO_INACTIVE_VALS) {
+    assert(0);  // todo
   }
 
-  int read_count = num_values;
+  size_t read_count = num_values;
 
-  if (mask_compressed && per_node_flag != NO_MASK_AND_ALL_VALS
-      && file_version >= OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION)
-  {
-    read_count = int(value_mask.countOn());
+  if (mask_compressed && per_node_flag != NO_MASK_AND_ALL_VALS &&
+      file_version >= OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
+    read_count = size_t(value_mask.countOn());
   }
 
-  // read data.
-  // usually fp16 or fp32
-  if (!ReadAndDecompressData(sr,
-    values->data(), GetValueTypeSize(value_type), size_t(read_count), compression_flags)) {
+  std::vector<unsigned char> tmp_buf(read_count * GetValueTypeSize(value_type));
+
+  // Read mask data.
+  if (!ReadAndDecompressData(sr, tmp_buf.data(), GetValueTypeSize(value_type),
+                             size_t(read_count), compression_flags)) {
     return false;
   }
 
@@ -1767,41 +1790,51 @@ static bool ReadMaskValues(
   // the temp buffer is smaller than the size of the destination buffer,
   // then there are missing (inactive) values.
   if (!seek && mask_compressed && read_count != num_values) {
-      // Restore inactive values, using the background value and, if available,
-      // the inside/outside mask.  (For fog volumes, the destination buffer is assumed
-      // to be initialized to background value zero, so inactive values can be ignored.)
-      for (int destIdx = 0, tempIdx = 0; destIdx < selection_mask.SIZE; ++destIdx) {
-          if (value_mask.isOn(int32(destIdx))) {
-              // Copy a saved active value into this node's buffer.
-              destBuf[destIdx] = tempBuf[tempIdx];
-              ++tempIdx;
-          } else {
-              // Reconstruct an unsaved inactive value and copy it into this node's buffer.
-              destBuf[destIdx] = (selection_mask.isOn(int32(destIdx)) ? inactiveVal1 : inactiveVal0);
-          }
+    // Restore inactive values, using the background value and, if available,
+    // the inside/outside mask.  (For fog volumes, the destination buffer is
+    // assumed to be initialized to background value zero, so inactive values
+    // can be ignored.)
+    size_t sz = GetValueTypeSize(value_type);
+    for (size_t destIdx = 0, tempIdx = 0; destIdx < selection_mask.SIZE;
+         ++destIdx) {
+      if (value_mask.isOn(int32(destIdx))) {
+        // Copy a saved active value into this node's buffer.
+        memcpy(&values->at(destIdx * sz), &tmp_buf.at(tempIdx * sz), sz);
+        ++tempIdx;
+      } else {
+        // Reconstruct an unsaved inactive value and copy it into this node's
+        // buffer.
+        if (selection_mask.isOn(int32(destIdx))) {
+          memcpy(&values->at(destIdx * sz), &inactiveVal1, sz);
+        } else {
+          memcpy(&values->at(destIdx * sz), &inactiveVal0, sz);
+        }
       }
+    }
+  } else {
+    memcpy(values->data(), tmp_buf.data(),
+           num_values * GetValueTypeSize(value_type));
   }
 
   return true;
 }
 
-
-bool NodeMask::load(StreamReader* sr)
-{
-  bool ret = sr->read(this->memUsage(), this->memUsage(), reinterpret_cast<unsigned char*>(mWords.data()));
+bool NodeMask::load(StreamReader *sr) {
+  bool ret = sr->read(this->memUsage(), this->memUsage(),
+                      reinterpret_cast<unsigned char *>(mWords.data()));
 
   return ret;
 }
 
-bool RootNode::ReadTopology(StreamReader *sr, const bool half_precision,
-                            const unsigned int file_version) {
-
+bool RootNode::ReadTopology(StreamReader *sr, const DeserializeParams &params) {
   std::cout << "Root background loc " << sr->tell() << std::endl;
 
   // Read background value;
   background_ = ReadValue(sr, node_info_.value_type());
 
-  std::cout << "background : " << background_ << ", size = " << GetValueTypeSize(node_info_.value_type()) << std::endl;
+  std::cout << "background : " << background_
+            << ", size = " << GetValueTypeSize(node_info_.value_type())
+            << std::endl;
 
   sr->read4(&num_tiles_);
   sr->read4(&num_children_);
@@ -1837,7 +1870,7 @@ bool RootNode::ReadTopology(StreamReader *sr, const bool half_precision,
     sr->read4(&vec[1]);
     sr->read4(&vec[2]);
 
-    child_node_->ReadTopology(sr, half_precision, file_version);
+    child_node_->ReadTopology(sr, params);
 
 #if 0  // TODO
     //mTable[Coord(vec)] = NodeStruct(*child);
@@ -1847,14 +1880,10 @@ bool RootNode::ReadTopology(StreamReader *sr, const bool half_precision,
   return true;
 }
 
-bool RootNode::ReadBuffer(StreamReader *sr,
-                          const unsigned char compression_flags,
-                          const bool half_precision,
-                          const unsigned int file_version) {
-
+bool RootNode::ReadBuffer(StreamReader *sr, const DeserializeParams &params) {
   // Recursive call
   for (size_t i = 0; i < num_children_; i++) {
-    if (!child_node_->ReadBuffer(sr, compression_flags, half_precision, file_version)) {
+    if (!child_node_->ReadBuffer(sr, params)) {
       return false;
     }
   }
@@ -1862,16 +1891,13 @@ bool RootNode::ReadBuffer(StreamReader *sr,
   return true;
 }
 
-bool LeafNode::ReadBuffer(StreamReader *sr,
-                          const unsigned char compression_flags,
-                          const bool half_precision,
-                          const unsigned int file_version) {
+bool LeafNode::ReadBuffer(StreamReader *sr, const DeserializeParams &params) {
   char num_buffers = 1;
 
   // Seek over the value mask.
   sr->seek_set(value_mask_end_pos_);
 
-  if (file_version < OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
+  if (params.file_version < OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
     int coord[3];
 
     // Read coordinate origin and num buffers.
@@ -1891,19 +1917,17 @@ bool LeafNode::ReadBuffer(StreamReader *sr,
 
   data_.resize(data_len);
 
-  bool ret = ReadCompressedValues(sr, compression_flags, file_version, half_precision, num_voxels_, node_info_.value_type(), value_mask_, data_.data());
+  bool ret = ReadValues(sr, params.compression_flags, num_voxels_,
+                        node_info_.value_type(), &data_);
 
   return ret;
 }
 
+bool InternalNode::ReadTopology(StreamReader *sr,
+                                const DeserializeParams &params) {
+  (void)params;
 
-bool InternalNode::ReadTopology(StreamReader *sr, const bool half_precision,
-                                const unsigned int file_version) {
-  (void)half_precision;
-  (void)file_version;
-  (void)child_node_;
-
-#if 0 // API3
+#if 0  // API3
   {
 
     int buffer_count;
@@ -1917,12 +1941,14 @@ bool InternalNode::ReadTopology(StreamReader *sr, const bool half_precision,
   std::cout << "topo: buffer count offt = " << sr->tell() << std::endl;
 
   child_mask_.load(sr);
-  std::cout << "topo: child mask buffer count offt = " << sr->tell() << std::endl;
+  std::cout << "topo: child mask buffer count offt = " << sr->tell()
+            << std::endl;
   value_mask_.load(sr);
-  std::cout << "topo: value mask buffer count offt = " << sr->tell() << std::endl;
+  std::cout << "topo: value mask buffer count offt = " << sr->tell()
+            << std::endl;
 
   const bool old_version =
-      file_version < OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION;
+      params.file_version < OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION;
 
   int NUM_VALUES =
       1 << (3 * node_info_
@@ -1937,11 +1963,11 @@ bool InternalNode::ReadTopology(StreamReader *sr, const bool half_precision,
     values.resize(GetValueTypeSize(node_info_.value_type()) *
                   size_t(num_values));
 
-#if 0 // TODO
-    if (!ReadCompressedValues(sr, num_values, node_info_.value_type(), value_mask_, half_precision, &values)) {
+    if (!ReadMaskValues(sr, params.compression_flags, params.file_version,
+                        params.background, size_t(num_values), node_info_.value_type(),
+                        value_mask_, &values)) {
       return false;
     }
-#endif
 
     // Copy values from the array into this node's table.
     if (old_version) {
@@ -1951,7 +1977,7 @@ bool InternalNode::ReadTopology(StreamReader *sr, const bool half_precision,
       int n = 0;
       for (int32 i = 0; i < int32(NUM_VALUES); i++) {
         if (child_mask_.isOff(i)) {
-          //mNodes[iter.pos()].setValue(values[n++]);
+          // mNodes[iter.pos()].setValue(values[n++]);
           n++;
         }
       }
@@ -1960,7 +1986,7 @@ bool InternalNode::ReadTopology(StreamReader *sr, const bool half_precision,
       // loop over child flags is off.
       for (int32 i = 0; i < int32(NUM_VALUES); i++) {
         if (child_mask_.isOff(i)) {
-          //mNodes[iter.pos()].setValue(values[iter.pos());
+          // mNodes[iter.pos()].setValue(values[iter.pos());
         }
       }
     }
@@ -1985,14 +2011,13 @@ bool InternalNode::ReadTopology(StreamReader *sr, const bool half_precision,
   return true;
 }
 
-bool InternalNode::ReadBuffer(StreamReader *sr, const bool half_precision,
-                              const unsigned int file_version) {
+bool InternalNode::ReadBuffer(StreamReader *sr,
+                              const DeserializeParams &params) {
   // TODO
   (void)sr;
-  (void)half_precision;
-  (void)file_version;
+  (void)params;
 
-  return true;
+  return false;
 }
 
 GridDescriptor::GridDescriptor()
@@ -2119,7 +2144,6 @@ static bool ReadMeta(StreamReader *sr) {
       std::cout << "  value = " << v[0] << ", " << v[1] << ", " << v[2]
                 << std::endl;
 
-
     } else if (type_name.compare("bool") == 0) {
       bool b = ReadMetaBool(sr);
 
@@ -2239,10 +2263,10 @@ static unsigned int ReadGridCompression(StreamReader *sr,
   return compression;
 }
 
-static bool ReadGrid(StreamReader *sr, const unsigned int file_version,
+static bool ReadGrid(StreamReader *sr, const DeserializeParams &params,
                      const GridDescriptor &gd, std::string *err) {
   // read compression per grid(optional)
-  unsigned int grid_compression = ReadGridCompression(sr, file_version);
+  unsigned int grid_compression = ReadGridCompression(sr, params.file_version);
   (void)grid_compression;
 
   // read meta
@@ -2277,11 +2301,11 @@ static bool ReadGrid(StreamReader *sr, const unsigned int file_version,
       }
     }
 
-    root_node.ReadTopology(sr, gd.SaveFloatAsHalf(), file_version);
+    root_node.ReadTopology(sr, params);
   }
 
   // Move to grid position
-  //sr->seek_set(tinyvdb_uint64(gd.GridPos()));
+  // sr->seek_set(tinyvdb_uint64(gd.GridPos()));
 
   return true;
 }
@@ -2593,12 +2617,15 @@ VDBStatus ReadGrids(const unsigned char *data, const size_t data_len,
   std::map<std::string, GridDescriptor>::const_iterator it(gd_map.begin());
   std::map<std::string, GridDescriptor>::const_iterator itEnd(gd_map.end());
 
+  DeserializeParams params;
+  params.file_version = header.file_version;
+
   for (; it != itEnd; it++) {
     const GridDescriptor &gd = it->second;
 
     sr.seek_set(gd.GridPos());
 
-    if (!ReadGrid(&sr, header.file_version, gd, err)) {
+    if (!ReadGrid(&sr, params, gd, err)) {
       if (err) {
         (*err) = "Failed to read Grid data.";
       }
