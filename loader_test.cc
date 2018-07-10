@@ -24,6 +24,7 @@ int main(int argc, char **argv)
     if (!err.empty()) {
       std::cerr << err << std::endl;
     }
+    return EXIT_FAILURE;
   }
 
   // 2. Read Grid descriptors
@@ -34,6 +35,7 @@ int main(int argc, char **argv)
     if (!err.empty()) {
       std::cerr << err << std::endl;
     }
+    return EXIT_FAILURE;
   }
 
   // 3. Read Grids
@@ -42,6 +44,7 @@ int main(int argc, char **argv)
     if (!err.empty()) {
       std::cerr << err << std::endl;
     }
+    return EXIT_FAILURE;
   }
 
   return EXIT_SUCCESS;
