@@ -1794,6 +1794,9 @@ static bool ReadAndDecompressData(StreamReader *sr, unsigned char *dst_data,
 
       if (!sr->read(size_t(numCompressedBytes), size_t(numCompressedBytes),
                     buf.data())) {
+        if (err) {
+          (*err) += "Failed to read num compressed bytes in ReadAndDecompressData.\n";
+        }
         return false;
       }
 
@@ -1835,6 +1838,9 @@ static bool ReadAndDecompressData(StreamReader *sr, unsigned char *dst_data,
 
       if (!sr->read(size_t(numZippedBytes), size_t(numZippedBytes),
                     buf.data())) {
+        if (err) {
+          (*err) += "Failed to read num zipped bytes in ReadAndDecompressData.\n";
+        }
         return false;
       }
 
@@ -2008,8 +2014,8 @@ static bool ReadMaskValues(StreamReader *sr,
 }
 
 bool NodeMask::load(StreamReader *sr) {
-  std::cout << "DBG: mWords memUsage = " << this->memUsage() << std::endl;
-  std::cout << "DBG: mWords.size = " << mWords.size() << std::endl;
+  //std::cout << "DBG: mWords memUsage = " << this->memUsage() << std::endl;
+  //std::cout << "DBG: mWords.size = " << mWords.size() << std::endl;
 
   bool ret = sr->read(this->memUsage(), this->memUsage(),
                       reinterpret_cast<unsigned char *>(mWords.data()));
@@ -2076,6 +2082,8 @@ bool RootNode::ReadTopology(StreamReader *sr, const DeserializeParams &params,
 
 bool RootNode::ReadBuffer(StreamReader *sr, const DeserializeParams &params,
                           std::string *err) {
+  std::cout << "root readbuffer pos " << sr->tell() << std::endl;
+
   // Recursive call
   for (size_t i = 0; i < num_children_; i++) {
     if (!child_node_->ReadBuffer(sr, params, err)) {
@@ -2195,30 +2203,30 @@ bool InternalNode::ReadTopology(StreamReader *sr,
   // loop over child node
   for (int32 i = 0; i < child_mask_.SIZE; i++) {
     if (child_mask_.isOn(i)) {
-      std::cout << "child! " << i << std::endl;
+      //std::cout << "child! " << i << std::endl;
+      if (!child_node_->ReadTopology(sr, params, err)) {
+        return false;
+      }
+      // TODO: add to child.
     }
   }
-
-#if 0
-  // Read in all child nodes and insert them into the table at their proper locations.
-  for (ChildOnIter iter = this->beginChildOn(); iter; ++iter) {
-      ChildNodeType* child = new ChildNodeType(PartialCreate(), iter.getCoord(), background);
-      mNodes[iter.pos()].setChild(child);
-      child->readTopology(is, half_precision);
-  }
-#endif
 
   return true;
 }
 
 bool InternalNode::ReadBuffer(StreamReader *sr, const DeserializeParams &params,
                               std::string *err) {
-  // TODO
-  (void)sr;
-  (void)params;
-  (void)err;
 
-  return false;
+  for (int32 i = 0; i < child_mask_.SIZE; i++) {
+    if (child_mask_.isOn(i)) {
+      // TODO: FIXME
+      if (!child_node_->ReadBuffer(sr, params, err)) {
+        return false;
+      }
+    }
+  }
+
+  return true;
 }
 
 GridDescriptor::GridDescriptor()
@@ -2510,6 +2518,15 @@ static bool ReadGrid(StreamReader *sr, const unsigned int file_version,
     if (!root_node.ReadTopology(sr, params, err)) {
       return false;
     }
+
+    // TODO(syoyo): bbox
+    if (!root_node.ReadBuffer(sr, params, err)) {
+      return false;
+    }
+    
+  } else {
+    // TODO
+    assert(0);
   }
 
   // Move to grid position
