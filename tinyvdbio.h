@@ -892,6 +892,10 @@ class LeafNode : public Node {
                   std::string *err);
 
  private:
+
+  /// Deep copy function
+  LeafNode &Copy(const LeafNode &rhs);
+
   NodeMask value_mask_;  // Leaf's value mask
 
   tinyvdb_uint64 value_mask_end_pos_;  // offset to the end of value_mask(start
@@ -902,6 +906,17 @@ class LeafNode : public Node {
 };
 
 LeafNode::~LeafNode() {}
+
+LeafNode &LeafNode::Copy(const LeafNode &rhs) {
+  value_mask_ = rhs.value_mask_;
+
+  value_mask_end_pos_ = rhs.value_mask_end_pos_;
+
+  data_ = rhs.data_;
+  num_voxels_ = rhs.num_voxels_;
+
+  return (*this);
+}
 
 bool LeafNode::ReadTopology(StreamReader *sr, const DeserializeParams &params,
                             std::string *err) {
@@ -960,6 +975,9 @@ class InternalNode : public Node {
   }
   ~InternalNode() {}
 
+  /// Deep copy function
+  InternalNode &Copy(const InternalNode &rhs);
+
   bool ReadTopology(StreamReader *sr, const DeserializeParams &parms,
                     std::string *err);
 
@@ -987,6 +1005,9 @@ class RootNode : public Node {
         num_tiles_(0),
         num_children_(0) {}
   ~RootNode() {}
+
+  /// Deep copy function
+  RootNode &Copy(const RootNode &rhs);
 
   bool ReadTopology(StreamReader *sr, const DeserializeParams &parms,
                     std::string *err);
@@ -2523,7 +2544,9 @@ static bool ReadGrid(StreamReader *sr, const unsigned int file_version,
     if (!root_node.ReadBuffer(sr, params, err)) {
       return false;
     }
-    
+
+    std::cout << "end = " << sr->tell() << std::endl;
+
   } else {
     // TODO
     assert(0);
@@ -2532,6 +2555,7 @@ static bool ReadGrid(StreamReader *sr, const unsigned int file_version,
   // Move to grid position
   // sr->seek_set(tinyvdb_uint64(gd.GridPos()));
 
+    
   return true;
 }
 
