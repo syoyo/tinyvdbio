@@ -854,6 +854,13 @@ class NodeUnion {
 class Node {
  public:
   Node(NodeInfo node_info) : node_info_(node_info) {}
+  Node &operator=(const Node &rhs) {
+    node_info_ = rhs.node_info_;
+    return (*this);
+  }
+  Node(const Node &rhs) : node_info_(rhs.node_info_) {
+  }
+
   virtual ~Node();
 
   virtual bool ReadTopology(StreamReader *sr, const DeserializeParams &params,
@@ -918,17 +925,6 @@ LeafNode &LeafNode::Copy(const LeafNode &rhs) {
   return (*this);
 }
 
-bool LeafNode::ReadTopology(StreamReader *sr, const DeserializeParams &params,
-                            std::string *err) {
-  // not used.
-  (void)params;
-  (void)err;
-
-  bool ret = value_mask_.load(sr);
-
-  return ret;
-}
-
 #if 0  // TODO
 bool LeafNode::WriteTopology(StreamWriter *sr, const bool half_precision,
                             const unsigned int file_version) {
@@ -944,7 +940,7 @@ bool LeafNode::WriteTopology(StreamWriter *sr, const bool half_precision,
 #endif
 
 ///
-/// Internal node have `InternalNode` or `LeafNode` as children.
+/// Internal node represents bifurcation or leaf node.
 ///
 class InternalNode : public Node {
  public:
@@ -962,16 +958,15 @@ class InternalNode : public Node {
   // static const int NUM_VALUES = 1 << (3 * Log2Dim); // total voxel count
   // represented by this node
 
-  InternalNode(NodeInfo node_info, Node *child_node)
+  InternalNode(NodeInfo node_info, NodeInfo child_node_info)
       : Node(node_info),
-        child_node_(child_node),
+        child_node_info_(child_node_info),
         child_mask_(node_info.log2dim()),
         value_mask_(node_info.log2dim()) {
     origin_[0] = 0.0f;
     origin_[1] = 0.0f;
     origin_[2] = 0.0f;
     node_values_.resize(child_mask_.memUsage());
-    (void)child_node_;
   }
   ~InternalNode() {}
 
@@ -985,23 +980,25 @@ class InternalNode : public Node {
                   std::string *err);
 
  private:
-  Node *child_node_;
-  // NodeUnion<ValueType, InternalNode> nodes_[NUM_VALUES];
-  std::vector<ValueType> node_values_;
+  NodeInfo child_node_info_;
+
+  // child nodes are internal or leaf depending on `child_node_info_` type.
+  std::vector<InternalNode> child_internal_nodes_;
+  std::vector<LeafNode> child_leaf_nodes_;
 
   NodeMask child_mask_;
   NodeMask value_mask_;
-  // NodeMask<Log2Dim> child_mask_;
-  // NodeMask<Log2Dim> value_mask_;
-
   int origin_[3];
+
+  std::vector<ValueType> node_values_;
+
 };
 
 class RootNode : public Node {
  public:
-  RootNode(const NodeInfo node_info, Node *child_node)
+  RootNode(const NodeInfo node_info, const NodeInfo child_node_info)
       : Node(node_info),
-        child_node_(child_node),
+        child_node_info_(child_node_info),
         num_tiles_(0),
         num_children_(0) {}
   ~RootNode() {}
@@ -1016,7 +1013,10 @@ class RootNode : public Node {
                   std::string *err);
 
  private:
-  Node *child_node_;
+  NodeInfo child_node_info_;
+
+  std::vector<InternalNode> child_nodes_;
+
   Value background_;  // Background(region of un-interested area) value
   unsigned int num_tiles_;
   unsigned int num_children_;
@@ -2089,9 +2089,15 @@ bool RootNode::ReadTopology(StreamReader *sr, const DeserializeParams &params,
     sr->read4(&vec[1]);
     sr->read4(&vec[2]);
 
-    if (!child_node_->ReadTopology(sr, params, err)) {
+    // Child should be InternalNode type
+    assert(child_node_info_.node_type() == NODE_TYPE_INTERNAL);
+
+    InternalNode child_node(node_info_, child_node_info_);
+    if (!child_node.ReadTopology(sr, params, err)) {
       return false;
     }
+
+    child_nodes_.push_back(child_node);
 
 #if 0  // TODO
     //mTable[Coord(vec)] = NodeStruct(*child);
@@ -2107,7 +2113,7 @@ bool RootNode::ReadBuffer(StreamReader *sr, const DeserializeParams &params,
 
   // Recursive call
   for (size_t i = 0; i < num_children_; i++) {
-    if (!child_node_->ReadBuffer(sr, params, err)) {
+    if (!child_nodes_[i].ReadBuffer(sr, params, err)) {
       return false;
     }
   }
@@ -2115,9 +2121,27 @@ bool RootNode::ReadBuffer(StreamReader *sr, const DeserializeParams &params,
   return true;
 }
 
+bool LeafNode::ReadTopology(StreamReader *sr, const DeserializeParams &params,
+                            std::string *err) {
+  // not used.
+  (void)params;
+  (void)err;
+
+  bool ret = value_mask_.load(sr);
+
+  if (!ret) return false;
+
+  value_mask_end_pos_ = sr->tell();
+
+  return ret;
+}
+
+
 bool LeafNode::ReadBuffer(StreamReader *sr, const DeserializeParams &params,
                           std::string *err) {
   char num_buffers = 1;
+
+  std::cout << "LeafNode.ReadBuffer pos = " << value_mask_end_pos_ << std::endl;
 
   // Seek over the value mask.
   sr->seek_set(value_mask_end_pos_);
@@ -2224,11 +2248,14 @@ bool InternalNode::ReadTopology(StreamReader *sr,
   // loop over child node
   for (int32 i = 0; i < child_mask_.SIZE; i++) {
     if (child_mask_.isOn(i)) {
-      //std::cout << "child! " << i << std::endl;
+      if (child_node_info_.node_type() == NODE_TYPE_INTERNAL) {
       if (!child_node_->ReadTopology(sr, params, err)) {
         return false;
       }
+      } else { // leaf
+      } 
       // TODO: add to child.
+      assert(0);
     }
   }
 
@@ -2238,12 +2265,15 @@ bool InternalNode::ReadTopology(StreamReader *sr,
 bool InternalNode::ReadBuffer(StreamReader *sr, const DeserializeParams &params,
                               std::string *err) {
 
+  size_t count = 0;
   for (int32 i = 0; i < child_mask_.SIZE; i++) {
     if (child_mask_.isOn(i)) {
+      std::cout << "InternalNode.ReadBuffer[" << count << "]" << std::endl;
       // TODO: FIXME
       if (!child_node_->ReadBuffer(sr, params, err)) {
         return false;
       }
+      count++;
     }
   }
 
@@ -2476,7 +2506,7 @@ static bool ReadTransform(StreamReader *sr, std::string *err) {
               << inv_twice_scale[1] << ", " << inv_twice_scale[2] << std::endl;
   } else {
     if (err) {
-      (*err) = "Transform type " + type + " is not supported.";
+      (*err) = "Transform type `" + type + "' is not supported.\n";
     }
     return false;
   }
@@ -2540,7 +2570,7 @@ static bool ReadGrid(StreamReader *sr, const unsigned int file_version,
       return false;
     }
 
-    // TODO(syoyo): bbox
+    // TODO(syoyo): Consider bbox(ROI)
     if (!root_node.ReadBuffer(sr, params, err)) {
       return false;
     }
@@ -2553,8 +2583,7 @@ static bool ReadGrid(StreamReader *sr, const unsigned int file_version,
   }
 
   // Move to grid position
-  // sr->seek_set(tinyvdb_uint64(gd.GridPos()));
-
+  sr->seek_set(tinyvdb_uint64(gd.GridPos()));
     
   return true;
 }
