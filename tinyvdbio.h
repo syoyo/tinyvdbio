@@ -657,8 +657,9 @@ class GridDescriptor {
 
 typedef enum {
   NODE_TYPE_ROOT = 0,
-  NODE_TYPE_INTERNAL = 1,
-  NODE_TYPE_LEAF = 2
+  NODE_TYPE_INTERMEDIATE = 1,
+  NODE_TYPE_LEAF = 2,
+  NODE_TYPE_INVALID = 3
 } NodeType;
 
 typedef enum {
@@ -803,6 +804,19 @@ static Value Negate(const Value &value) {
   return value;
 }
 
+class TreeDesc;
+
+
+class TreeDesc
+{
+ public:
+  TreeDesc();
+  ~TreeDesc();
+
+ private:
+  TreeDesc *child_tree_desc_;
+};
+
 class NodeInfo {
  public:
   NodeInfo(NodeType node_type, ValueType value_type, int32 log2dim)
@@ -820,7 +834,21 @@ class NodeInfo {
   int32 log2dim_;
 };
 
-class InternalNode;
+///
+/// NodeDesc describes the topology of child node.
+///
+class NodeDesc {
+ public:
+  NodeDesc(NodeInfo node_info, NodeDesc *child_node_desc) :
+    node_info_(node_info),
+    child_node_desc_(child_node_desc) {
+  }
+
+  NodeInfo node_info_;
+  NodeDesc *child_node_desc_; // null for leaf node.
+};
+
+class IntermediateOrLeafNode;
 
 #if 0  // TODO: remove
 // Assume `ValueT` is pod type(e.g. float).
@@ -940,9 +968,9 @@ bool LeafNode::WriteTopology(StreamWriter *sr, const bool half_precision,
 #endif
 
 ///
-/// Internal node represents bifurcation or leaf node.
+/// IntermediateOrLeaf node represents bifurcation or leaf node.
 ///
-class InternalNode : public Node {
+class IntermediateOrLeafNode : public Node {
  public:
   // static const int LOG2DIM = Log2Dim,  // log2 of tile count in one
   // dimension
@@ -958,7 +986,20 @@ class InternalNode : public Node {
   // static const int NUM_VALUES = 1 << (3 * Log2Dim); // total voxel count
   // represented by this node
 
-  InternalNode(NodeInfo node_info, NodeInfo child_node_info)
+  IntermediateOrLeafNode(NodeDesc node_desc)
+      : Node(node_desc.node_info_),
+        node_desc_(node_desc),
+        child_mask_(node_desc.node_info_.log2dim()),
+        value_mask_(node_desc.node_info_.log2dim()) {
+    origin_[0] = 0.0f;
+    origin_[1] = 0.0f;
+    origin_[2] = 0.0f;
+    node_values_.resize(child_mask_.memUsage());
+  }
+
+#if 0
+  // For internal node
+  IntermediateOrLeafNode(NodeInfo node_info, NodeInfo child_node_info)
       : Node(node_info),
         child_node_info_(child_node_info),
         child_mask_(node_info.log2dim()),
@@ -967,11 +1008,15 @@ class InternalNode : public Node {
     origin_[1] = 0.0f;
     origin_[2] = 0.0f;
     node_values_.resize(child_mask_.memUsage());
+
   }
-  ~InternalNode() {}
+#endif
+
+
+  ~IntermediateOrLeafNode() {}
 
   /// Deep copy function
-  InternalNode &Copy(const InternalNode &rhs);
+  IntermediateOrLeafNode &Copy(const IntermediateOrLeafNode &rhs);
 
   bool ReadTopology(StreamReader *sr, const DeserializeParams &parms,
                     std::string *err);
@@ -980,11 +1025,11 @@ class InternalNode : public Node {
                   std::string *err);
 
  private:
-  NodeInfo child_node_info_;
+  //NodeInfo child_node_info_;
+  NodeDesc node_desc_;
 
   // child nodes are internal or leaf depending on `child_node_info_` type.
-  std::vector<InternalNode> child_internal_nodes_;
-  std::vector<LeafNode> child_leaf_nodes_;
+  std::vector<IntermediateOrLeafNode> child_nodes_;
 
   NodeMask child_mask_;
   NodeMask value_mask_;
@@ -996,9 +1041,9 @@ class InternalNode : public Node {
 
 class RootNode : public Node {
  public:
-  RootNode(const NodeInfo node_info, const NodeInfo child_node_info)
+  RootNode(const NodeInfo node_info, const NodeDesc child_node_desc)
       : Node(node_info),
-        child_node_info_(child_node_info),
+        child_node_desc_(child_node_desc),
         num_tiles_(0),
         num_children_(0) {}
   ~RootNode() {}
@@ -1013,27 +1058,14 @@ class RootNode : public Node {
                   std::string *err);
 
  private:
-  NodeInfo child_node_info_;
+  NodeDesc child_node_desc_;
 
-  std::vector<InternalNode> child_nodes_;
+  std::vector<IntermediateOrLeafNode> child_nodes_;
 
   Value background_;  // Background(region of un-interested area) value
   unsigned int num_tiles_;
   unsigned int num_children_;
 };
-
-#if 0
-///
-/// Reader class for Tree data
-///
-class TreeReader {
- public:
-  TreeReader();
-  ~TreeReader();
-
-  bool Read(std::istream &is);
-};
-#endif
 
 #ifdef __clang__
 #pragma clang diagnostic pop
@@ -2089,10 +2121,10 @@ bool RootNode::ReadTopology(StreamReader *sr, const DeserializeParams &params,
     sr->read4(&vec[1]);
     sr->read4(&vec[2]);
 
-    // Child should be InternalNode type
-    assert(child_node_info_.node_type() == NODE_TYPE_INTERNAL);
+    // Child should be IntermediateOrLeafNode type
+    //assert(child_node_info_.node_type() == NODE_TYPE_INTERMEDIATE);
 
-    InternalNode child_node(node_info_, child_node_info_);
+    IntermediateOrLeafNode child_node(child_node_desc_);
     if (!child_node.ReadTopology(sr, params, err)) {
       return false;
     }
@@ -2172,7 +2204,7 @@ bool LeafNode::ReadBuffer(StreamReader *sr, const DeserializeParams &params,
   return ret;
 }
 
-bool InternalNode::ReadTopology(StreamReader *sr,
+bool IntermediateOrLeafNode::ReadTopology(StreamReader *sr,
                                 const DeserializeParams &params,
                                 std::string *err) {
   (void)params;
@@ -2248,10 +2280,10 @@ bool InternalNode::ReadTopology(StreamReader *sr,
   // loop over child node
   for (int32 i = 0; i < child_mask_.SIZE; i++) {
     if (child_mask_.isOn(i)) {
-      if (child_node_info_.node_type() == NODE_TYPE_INTERNAL) {
-      if (!child_node_->ReadTopology(sr, params, err)) {
-        return false;
-      }
+      if (node_desc_.child_node_desc_) {
+        if (!child_nodes_[i].ReadTopology(sr, params, err)) {
+          return false;
+        }
       } else { // leaf
       } 
       // TODO: add to child.
@@ -2262,15 +2294,15 @@ bool InternalNode::ReadTopology(StreamReader *sr,
   return true;
 }
 
-bool InternalNode::ReadBuffer(StreamReader *sr, const DeserializeParams &params,
+bool IntermediateOrLeafNode::ReadBuffer(StreamReader *sr, const DeserializeParams &params,
                               std::string *err) {
 
   size_t count = 0;
   for (int32 i = 0; i < child_mask_.SIZE; i++) {
     if (child_mask_.isOn(i)) {
-      std::cout << "InternalNode.ReadBuffer[" << count << "]" << std::endl;
+      std::cout << "IntermediateOrLeafNode.ReadBuffer[" << count << "]" << std::endl;
       // TODO: FIXME
-      if (!child_node_->ReadBuffer(sr, params, err)) {
+      if (!child_nodes_[i].ReadBuffer(sr, params, err)) {
         return false;
       }
       count++;
@@ -2548,14 +2580,18 @@ static bool ReadGrid(StreamReader *sr, const unsigned int file_version,
   if (!gd.IsInstance()) {
     // TODO(syoyo): Construct node hierarchy based on header description.
     NodeInfo leaf(NODE_TYPE_LEAF, VALUE_TYPE_FLOAT, 3);
-    NodeInfo internal2(NODE_TYPE_INTERNAL, VALUE_TYPE_FLOAT, 4);
-    NodeInfo internal1(NODE_TYPE_INTERNAL, VALUE_TYPE_FLOAT, 5);
+    NodeInfo intermediate2(NODE_TYPE_INTERMEDIATE, VALUE_TYPE_FLOAT, 4);
+    NodeInfo intermediate1(NODE_TYPE_INTERMEDIATE, VALUE_TYPE_FLOAT, 5);
     NodeInfo root(NODE_TYPE_ROOT, VALUE_TYPE_FLOAT, 0);
 
-    LeafNode leaf_node(leaf);
-    InternalNode internal2_node(internal2, &leaf_node);
-    InternalNode internal1_node(internal1, &internal2_node);
-    RootNode root_node(root, &internal1_node);
+    NodeDesc leaf_desc(leaf, NULL);
+    NodeDesc intermediate2_desc(intermediate2, &leaf_desc);
+    NodeDesc intermediate1_desc(intermediate1, &intermediate2_desc);
+
+    IntermediateOrLeafNode leaf_node(leaf_desc);
+    IntermediateOrLeafNode internal2_node(intermediate2_desc);
+    IntermediateOrLeafNode internal1_node(intermediate1_desc);
+    RootNode root_node(root, intermediate1_desc);
 
     // TreeBase
     {
