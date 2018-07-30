@@ -1012,6 +1012,20 @@ class IntermediateOrLeafNode : public Node {
   }
 #endif
 
+  IntermediateOrLeafNode(const IntermediateOrLeafNode &rhs) :
+    Node(rhs.node_desc_.node_info_),
+    node_desc_(rhs.node_desc_),
+    child_mask_(rhs.child_mask_),
+    value_mask_(rhs.value_mask_)
+     {
+
+    origin_[0] = rhs.origin_[0];
+    origin_[1] = rhs.origin_[1];
+    origin_[2] = rhs.origin_[2];
+
+    node_values_ = rhs.node_values_;
+  }
+
 
   ~IntermediateOrLeafNode() {}
 
