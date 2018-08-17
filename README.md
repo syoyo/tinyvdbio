@@ -2,7 +2,7 @@
 
 TinyVDBIO is header-only C++03 OpenVDB IO library. Not all OpenVDB format are supported. Also, TinyVDBIO does not provide non-IO related features(e.g. volume op, iso-surface generation).
 
-TinyVDBIO is good to not only your graphics application, but also HPC visualization tools.
+TinyVDBIO is good for not only your graphics application, but also HPC visualization tools.
 
 ## Features
 
@@ -10,6 +10,8 @@ TinyVDBIO is good to not only your graphics application, but also HPC visualizat
 * [x] Big endian support(e.g. Power, SPARC)
 * [x] Cross-platform(should be at least compilable on Linux, macOS and Windows)
 * [x] Limited support of loading OpenVDB data(version from 220 to 223 are supported)
+  * [x] ZIP compression
+  * [x] BLOSC compression
 * [ ] Simple saving of OpenVDB data.
 
 ### TinyVDB only feature
@@ -30,7 +32,6 @@ Currently, only `FloatTree`(`tree::Tree4<float,       5, 4, 3>::Type`) topology 
 * [ ] Support various topology type.
 * [ ] Support Multipass IO version(224)
 * [ ] mmap based accesss for larger data set.
-
 
 ## How to use
 
@@ -75,7 +76,7 @@ There are two bit masks, `child mask` and `value mask`, for each `Node`.
 
 ## License
 
-TinyVDB is released under the [Mozilla Public License Version 2.0](https://www.mozilla.org/MPL/2.0/), which is a free, open source, and detailed software license developed and maintained by the Mozilla Foundation. It is a hybrid of the modified [BSD license](https://en.wikipedia.org/wiki/BSD_licenses#3-clause) and the [GNU General Public License](https://en.wikipedia.org/wiki/GNU_General_Public_License) (GPL) that seeks to balance the concerns of proprietary and open source developers.
+TinyVDBIO is released under the [Mozilla Public License Version 2.0](https://www.mozilla.org/MPL/2.0/), which is a free, open source, and detailed software license developed and maintained by the Mozilla Foundation. It is a hybrid of the modified [BSD license](https://en.wikipedia.org/wiki/BSD_licenses#3-clause) and the [GNU General Public License](https://en.wikipedia.org/wiki/GNU_General_Public_License) (GPL) that seeks to balance the concerns of proprietary and open source developers.
 
 ### Notes on patent
 

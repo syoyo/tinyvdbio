@@ -1043,7 +1043,7 @@ class IntermediateOrLeafNode : public Node {
   NodeDesc node_desc_;
 
   // child nodes are internal or leaf depending on `child_node_info_` type.
-  std::vector<IntermediateOrLeafNode> child_nodes_;
+  std::vector<IntermediateOrLeafNode*> child_nodes_;
 
   NodeMask child_mask_;
   NodeMask value_mask_;
@@ -1059,7 +1059,9 @@ class RootNode : public Node {
       : Node(node_info),
         child_node_desc_(child_node_desc),
         num_tiles_(0),
-        num_children_(0) {}
+        num_children_(0) {
+
+  }
   ~RootNode() {}
 
   /// Deep copy function
@@ -2295,7 +2297,8 @@ bool IntermediateOrLeafNode::ReadTopology(StreamReader *sr,
   for (int32 i = 0; i < child_mask_.SIZE; i++) {
     if (child_mask_.isOn(i)) {
       if (node_desc_.child_node_desc_) {
-        if (!child_nodes_[i].ReadTopology(sr, params, err)) {
+        assert(i < child_nodes_.size());
+        if (!child_nodes_[i]->ReadTopology(sr, params, err)) {
           return false;
         }
       } else { // leaf
@@ -2316,7 +2319,7 @@ bool IntermediateOrLeafNode::ReadBuffer(StreamReader *sr, const DeserializeParam
     if (child_mask_.isOn(i)) {
       std::cout << "IntermediateOrLeafNode.ReadBuffer[" << count << "]" << std::endl;
       // TODO: FIXME
-      if (!child_nodes_[i].ReadBuffer(sr, params, err)) {
+      if (!child_nodes_[i]->ReadBuffer(sr, params, err)) {
         return false;
       }
       count++;
@@ -2522,7 +2525,8 @@ static bool ReadTransform(StreamReader *sr, std::string *err) {
   double inv_scale_squared[3];
   double inv_twice_scale[3];
 
-  if (type.compare("UniformScaleMap") == 0) {
+  if ((type.compare("UniformScaleMap") == 0) ||
+      (type.compare("UniformScaleTranslateMap") == 0)) {
     std::cout << "offt = " << sr->tell() << std::endl;
 
     scale_values[0] = scale_values[1] = scale_values[2] = 0.0;
