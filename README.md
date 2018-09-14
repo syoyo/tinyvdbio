@@ -1,6 +1,8 @@
-# TinyVDBIO, header-only C++03 (limited) OpenVDB IO library.
+# TinyVDBIO, header-only C++ OpenVDB IO library.
 
-TinyVDBIO is header-only C++03 OpenVDB IO library. Not all OpenVDB format are supported. Also, TinyVDBIO does not provide non-IO related features(e.g. volume op, iso-surface generation).
+**WARNIG! This is still experimental project and WORK IN PROGRESS project!! not working yet**
+
+TinyVDBIO is header-only C++ OpenVDB IO library. Not all OpenVDB format are supported. Also, TinyVDBIO does not provide non-IO related features(e.g. volume op, iso-surface generation).
 
 TinyVDBIO is good for not only your graphics application, but also HPC visualization tools.
 
@@ -11,7 +13,7 @@ TinyVDBIO is good for not only your graphics application, but also HPC visualiza
 * [x] Cross-platform(should be at least compilable on Linux, macOS and Windows)
 * [x] Limited support of loading OpenVDB data(version from 220 to 223 are supported)
   * [x] ZIP compression
-  * [x] BLOSC compression
+  * [ ] BLOSC compression
 * [ ] Simple saving of OpenVDB data.
 
 ### TinyVDB only feature

@@ -1196,15 +1196,16 @@ const int kOPENVDB_MAGIC = 0x56444220;
 ///
 const unsigned int kTINYVDB_FILE_VERSION = 220;
 
-// TODO(syoyo) Rewrite with TINYVDB_...
-/// Notable file format version numbers
+// File format versions.
+// This should be same with OpenVDB's implementation.
+// We don't support version less than 220
 enum {
-  OPENVDB_FILE_VERSION_SELECTIVE_COMPRESSION = 220,
-  OPENVDB_FILE_VERSION_FLOAT_FRUSTUM_BBOX = 221,
-  OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION = 222,
-  OPENVDB_FILE_VERSION_BLOSC_COMPRESSION = 223,
-  OPENVDB_FILE_VERSION_POINT_INDEX_GRID = 223,
-  OPENVDB_FILE_VERSION_MULTIPASS_IO = 224
+  TINYVDB_FILE_VERSION_SELECTIVE_COMPRESSION = 220,
+  TINYVDB_FILE_VERSION_FLOAT_FRUSTUM_BBOX = 221,
+  TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION = 222,
+  TINYVDB_FILE_VERSION_BLOSC_COMPRESSION = 223,
+  TINYVDB_FILE_VERSION_POINT_INDEX_GRID = 223,
+  TINYVDB_FILE_VERSION_MULTIPASS_IO = 224
 };
 
 enum {
@@ -1987,7 +1988,7 @@ static bool ReadMaskValues(StreamReader *sr,
   const bool mask_compressed = compression_flags & COMPRESS_ACTIVE_MASK;
 
   char per_node_flag = NO_MASK_AND_ALL_VALS;
-  if (file_version >= OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
+  if (file_version >= TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
     if (seek && !mask_compressed) {
       // selection mask and/or inactive value is saved.
       sr->seek_set(sr->tell() + 1);  // advance 1 byte.
@@ -2037,7 +2038,7 @@ static bool ReadMaskValues(StreamReader *sr,
   size_t read_count = num_values;
 
   if (mask_compressed && per_node_flag != NO_MASK_AND_ALL_VALS &&
-      file_version >= OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
+      file_version >= TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
     read_count = size_t(value_mask.countOn());
   }
 
@@ -2194,7 +2195,7 @@ bool LeafNode::ReadBuffer(StreamReader *sr, const DeserializeParams &params,
   // Seek over the value mask.
   sr->seek_set(value_mask_end_pos_);
 
-  if (params.file_version < OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
+  if (params.file_version < TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
     int coord[3];
 
     // Read coordinate origin and num buffers.
@@ -2246,7 +2247,7 @@ bool IntermediateOrLeafNode::ReadTopology(StreamReader *sr,
             << std::endl;
 
   const bool old_version =
-      params.file_version < OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION;
+      params.file_version < TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION;
 
   int NUM_VALUES =
       1 << (3 * node_info_
@@ -2567,7 +2568,7 @@ static bool ReadTransform(StreamReader *sr, std::string *err) {
 static unsigned int ReadGridCompression(StreamReader *sr,
                                         unsigned int file_version) {
   unsigned int compression = COMPRESS_NONE;
-  if (file_version >= OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
+  if (file_version >= TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
     sr->read4(&compression);
   }
   return compression;
@@ -2741,11 +2742,11 @@ VDBStatus ParseVDBHeader(const unsigned char *data, const size_t len,
 
   std::cout << "File version: " << file_version << std::endl;
 
-  if (file_version < OPENVDB_FILE_VERSION_SELECTIVE_COMPRESSION) {
+  if (file_version < TINYVDB_FILE_VERSION_SELECTIVE_COMPRESSION) {
     if (err) {
       (*err) =
           "VDB file version earlier than "
-          "OPENVDB_FILE_VERSION_SELECTIVE_COMPRESSION(220) is not supported.";
+          "TINYVDB_FILE_VERSION_SELECTIVE_COMPRESSION(220) is not supported.";
     }
     return TINYVDBIO_ERROR_UNIMPLEMENTED;
   }
@@ -2782,17 +2783,17 @@ VDBStatus ParseVDBHeader(const unsigned char *data, const size_t len,
   // 5) Read the flag that indicates whether data is compressed.
   //    (From version 222 on, compression information is stored per grid.)
   // mCompression = DEFAULT_COMPRESSION_FLAGS;
-  // if (file_version < OPENVDB_FILE_VERSION_BLOSC_COMPRESSION) {
+  // if (file_version < TINYVDB_FILE_VERSION_BLOSC_COMPRESSION) {
   //    // Prior to the introduction of Blosc, ZLIB was the default compression
   //    scheme. mCompression = (COMPRESS_ZIP | COMPRESS_ACTIVE_MASK);
   //}
   char is_compressed = 0;
-  if (file_version >= OPENVDB_FILE_VERSION_SELECTIVE_COMPRESSION &&
-      file_version < OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
+  if (file_version >= TINYVDB_FILE_VERSION_SELECTIVE_COMPRESSION &&
+      file_version < TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
     sr.read1(&is_compressed);
     std::cout << "Compression : " << (is_compressed != 0 ? "zip" : "none")
               << std::endl;
-    if (file_version >= OPENVDB_FILE_VERSION_BLOSC_COMPRESSION) {
+    if (file_version >= TINYVDB_FILE_VERSION_BLOSC_COMPRESSION) {
     }
   }
 
@@ -3001,20 +3002,20 @@ static bool WriteVDBHeader(std::ostream &os) {
   // 5) Read the flag that indicates whether data is compressed.
   //    (From version 222 on, compression information is stored per grid.)
   // mCompression = DEFAULT_COMPRESSION_FLAGS;
-  // if (file_version < OPENVDB_FILE_VERSION_BLOSC_COMPRESSION) {
+  // if (file_version < TINYVDB_FILE_VERSION_BLOSC_COMPRESSION) {
   //    // Prior to the introduction of Blosc, ZLIB was the default compression
   //    scheme. mCompression = (COMPRESS_ZIP | COMPRESS_ACTIVE_MASK);
   //}
   char isCompressed = 0;
-  if (file_version >= OPENVDB_FILE_VERSION_SELECTIVE_COMPRESSION &&
-      file_version < OPENVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
+  if (file_version >= TINYVDB_FILE_VERSION_SELECTIVE_COMPRESSION &&
+      file_version < TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
     ifs.read(&isCompressed, sizeof(char));
     std::cout << "Compression : " << (isCompressed != 0 ? "zip" : "none")
               << std::endl;
   }
 
   // 6) Read the 16-byte(128-bit) uuid.
-  if (file_version >= OPENVDB_FILE_VERSION_BOOST_UUID) {
+  if (file_version >= TINYVDB_FILE_VERSION_BOOST_UUID) {
     // ASCII UUID = 32 chars + 4 '-''s = 36 bytes.
     char uuid[36];
     ifs.read(uuid, 36);
