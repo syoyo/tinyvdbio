@@ -17,6 +17,7 @@ int main(int argc, char **argv)
 
   // 1. Parse VDB header
   tinyvdb::VDBHeader header;
+  std::string warn;
   std::string err;
   tinyvdb::VDBStatus status = tinyvdb::ParseVDBHeader(argv[1], &header, &err);
 
@@ -39,7 +40,7 @@ int main(int argc, char **argv)
   }
 
   // 3. Read Grids
-  status = tinyvdb::ReadGrids(argv[1], header, gd_map, &err);
+  status = tinyvdb::ReadGrids(argv[1], header, gd_map, &warn, &err);
   if (status != tinyvdb::TINYVDBIO_SUCCESS) {
     if (!err.empty()) {
       std::cerr << err << std::endl;

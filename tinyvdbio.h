@@ -64,6 +64,9 @@ typedef long long tinyvdb_int64;
 typedef unsigned int int32;
 typedef tinyvdb_uint64 int64;
 
+// Forward decl.
+class GridLayoutInfo;
+
 #ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wpadded"
@@ -848,74 +851,65 @@ class NodeDesc {
   NodeDesc *child_node_desc_; // null for leaf node.
 };
 
-class IntermediateOrLeafNode;
-
-#if 0  // TODO: remove
-// Assume `ValueT` is pod type(e.g. float).
-template <typename ValueT, typename ChildT>
-class NodeUnion {
- private:
-  union {
-    ChildT *mChild;
-    ValueT mValue;
-  };
-
+// Stores layout of grid
+class GridLayoutInfo {
  public:
-  NodeUnion() : mChild(NULL) {}
-  NodeUnion(const NodeUnion &other) : mChild(NULL) {
-    std::memcpy(this, &other, sizeof(*this));
-  }
-  NodeUnion &operator=(const NodeUnion &rhs) {
-    std::memcpy(this, &rhs, sizeof(*this));
-    return *this;
+  GridLayoutInfo() {}
+  ~GridLayoutInfo() {}
+
+  void Add(const NodeInfo &node_info) {
+    node_infos_.push_back(node_info);
   }
 
-  ChildT *getChild() const { return mChild; }
-  void setChild(ChildT *child) { mChild = child; }
+  const NodeInfo &GetInfo(size_t level) const {
+    //TINYVDBIO_ASSERT(level <= node_infos_.size());
+    return node_infos_[level];
+  }
 
-  const ValueT &getValue() const { return mValue; }
-  ValueT &getValue() { return mValue; }
-  void setValue(const ValueT &val) { mValue = val; }
+  int NumLevels() const {
+    return node_infos_.size();
+  }
+
+  std::vector<NodeInfo> node_infos_;
 };
-#endif
+
+class IntermediateOrLeafNode;
 
 class Node {
  public:
-  Node(NodeInfo node_info) : node_info_(node_info) {}
+  Node(const GridLayoutInfo &layout_info) : grid_layout_info_(layout_info) {}
   Node &operator=(const Node &rhs) {
-    node_info_ = rhs.node_info_;
+    grid_layout_info_ = rhs.grid_layout_info_;
     return (*this);
   }
-  Node(const Node &rhs) : node_info_(rhs.node_info_) {
+  Node(const Node &rhs) : grid_layout_info_(rhs.grid_layout_info_) {
   }
 
   virtual ~Node();
 
-  virtual bool ReadTopology(StreamReader *sr, const DeserializeParams &params,
-                            std::string *err) = 0;
+  virtual bool ReadTopology(StreamReader *sr, int level, const DeserializeParams &params,
+                            std::string *warn, std::string *err) = 0;
 
-  virtual bool ReadBuffer(StreamReader *sr, const DeserializeParams &params,
-                          std::string *err) = 0;
+  virtual bool ReadBuffer(StreamReader *sr, int level, const DeserializeParams &params,
+                          std::string *warn, std::string *err) = 0;
 
  protected:
-  NodeInfo node_info_;
+  GridLayoutInfo grid_layout_info_;
 };
 
 Node::~Node() {}
 
 class LeafNode : public Node {
  public:
-  LeafNode(const NodeInfo node_info)
-      : Node(node_info),
-        value_mask_(node_info.log2dim()),
-        value_mask_end_pos_(0) {
-    num_voxels_ = 1 << (3 * node_info.log2dim());
+  LeafNode(const GridLayoutInfo &grid_layout_info)
+      : Node(grid_layout_info) {
+    //num_voxels_ = 1 << (3 * node_info.log2dim());
   }
 
   ~LeafNode();
 
-  bool ReadTopology(StreamReader *sr, const DeserializeParams &params,
-                    std::string *err);
+  bool ReadTopology(StreamReader *sr, int level, const DeserializeParams &params,
+                    std::string *warn, std::string *err);
 
   // bool WriteTopology(StreamReader *sr, const bool half_precision,
   //                   const unsigned int file_version);
@@ -923,15 +917,15 @@ class LeafNode : public Node {
   ///
   /// Reads voxel data.
   ///
-  bool ReadBuffer(StreamReader *sr, const DeserializeParams &params,
-                  std::string *err);
+  bool ReadBuffer(StreamReader *sr, int level, const DeserializeParams &params,
+                  std::string *warn, std::string *err);
 
  private:
 
   /// Deep copy function
   LeafNode &Copy(const LeafNode &rhs);
 
-  NodeMask value_mask_;  // Leaf's value mask
+  NodeMask *value_mask_;  // Leaf's value mask
 
   tinyvdb_uint64 value_mask_end_pos_;  // offset to the end of value_mask(start
                                        // of Leaf's buffer data)
@@ -943,7 +937,7 @@ class LeafNode : public Node {
 LeafNode::~LeafNode() {}
 
 LeafNode &LeafNode::Copy(const LeafNode &rhs) {
-  value_mask_ = rhs.value_mask_;
+  //value_mask_ = rhs.value_mask_;
 
   value_mask_end_pos_ = rhs.value_mask_end_pos_;
 
@@ -986,15 +980,12 @@ class IntermediateOrLeafNode : public Node {
   // static const int NUM_VALUES = 1 << (3 * Log2Dim); // total voxel count
   // represented by this node
 
-  IntermediateOrLeafNode(NodeDesc node_desc)
-      : Node(node_desc.node_info_),
-        node_desc_(node_desc),
-        child_mask_(node_desc.node_info_.log2dim()),
-        value_mask_(node_desc.node_info_.log2dim()) {
+  IntermediateOrLeafNode(const GridLayoutInfo &grid_layout_info)
+      : Node(grid_layout_info) {
     origin_[0] = 0.0f;
     origin_[1] = 0.0f;
     origin_[2] = 0.0f;
-    node_values_.resize(child_mask_.memUsage());
+    //node_values_.resize(child_mask_.memUsage());
   }
 
 #if 0
@@ -1012,11 +1003,9 @@ class IntermediateOrLeafNode : public Node {
   }
 #endif
 
+#if 0
   IntermediateOrLeafNode(const IntermediateOrLeafNode &rhs) :
     Node(rhs.node_desc_.node_info_),
-    node_desc_(rhs.node_desc_),
-    child_mask_(rhs.child_mask_),
-    value_mask_(rhs.value_mask_)
      {
 
     origin_[0] = rhs.origin_[0];
@@ -1025,39 +1014,51 @@ class IntermediateOrLeafNode : public Node {
 
     node_values_ = rhs.node_values_;
   }
+#endif
 
 
-  ~IntermediateOrLeafNode() {}
+  ~IntermediateOrLeafNode();
+  
 
   /// Deep copy function
   IntermediateOrLeafNode &Copy(const IntermediateOrLeafNode &rhs);
 
-  bool ReadTopology(StreamReader *sr, const DeserializeParams &parms,
-                    std::string *err);
+  ///
+  /// @param[in] level Depth of this node(0: root, 1: first intermediate, ...)
+  ///
+  bool ReadTopology(StreamReader *sr, int level, const DeserializeParams &parms,
+                    std::string *warn, std::string *err);
 
-  bool ReadBuffer(StreamReader *sr, const DeserializeParams &params,
-                  std::string *err);
+  bool ReadBuffer(StreamReader *sr, int level, const DeserializeParams &params,
+                  std::string *warn, std::string *err);
 
  private:
   //NodeInfo child_node_info_;
-  NodeDesc node_desc_;
+  //NodeDesc node_desc_;
+  GridLayoutInfo grid_layout_info_;
 
   // child nodes are internal or leaf depending on `child_node_info_` type.
   std::vector<IntermediateOrLeafNode*> child_nodes_;
 
-  NodeMask child_mask_;
-  NodeMask value_mask_;
+  NodeMask *child_mask_;
+  NodeMask *value_mask_;
   int origin_[3];
 
   std::vector<ValueType> node_values_;
 
 };
 
+IntermediateOrLeafNode::~IntermediateOrLeafNode()
+{
+  for (size_t i = 0; i < child_nodes_.size(); i++) {
+    delete child_nodes_[i];
+  }
+}
+
 class RootNode : public Node {
  public:
-  RootNode(const NodeInfo node_info, const NodeDesc child_node_desc)
-      : Node(node_info),
-        child_node_desc_(child_node_desc),
+  RootNode(const GridLayoutInfo &layout_info)
+      : Node(layout_info),
         num_tiles_(0),
         num_children_(0) {
 
@@ -1067,14 +1068,14 @@ class RootNode : public Node {
   /// Deep copy function
   RootNode &Copy(const RootNode &rhs);
 
-  bool ReadTopology(StreamReader *sr, const DeserializeParams &parms,
-                    std::string *err);
+  bool ReadTopology(StreamReader *sr, int level, const DeserializeParams &parms,
+                    std::string *warn, std::string *err);
 
-  bool ReadBuffer(StreamReader *sr, const DeserializeParams &params,
-                  std::string *err);
+  bool ReadBuffer(StreamReader *sr, int level, const DeserializeParams &params,
+                  std::string *warn, std::string *err);
 
  private:
-  NodeDesc child_node_desc_;
+  //NodeDesc child_node_desc_;
 
   std::vector<IntermediateOrLeafNode> child_nodes_;
 
@@ -1146,11 +1147,12 @@ VDBStatus ReadGrids(const std::string &filename, const VDBHeader &header,
 /// Returns TINYVDBIO_SUCCESS upon success.
 /// Returns false when failed to read VDB data and store error message to
 /// `err`.
+/// Returns warning message tot `warn`.
 ///
 VDBStatus ReadGrids(const unsigned char *data, const size_t data_len,
                     const VDBHeader &header,
                     const std::map<std::string, GridDescriptor> &gd_map,
-                    std::string *err);
+                    std::string *warn, std::string *err);
 
 ///
 /// Write VDB data to a file.
@@ -1158,6 +1160,8 @@ VDBStatus ReadGrids(const unsigned char *data, const size_t data_len,
 bool SaveVDB(const std::string &filename, std::string *err);
 
 }  // namespace tinyvdb
+
+#endif // TINY_VDB_IO_H_
 
 #ifdef TINYVDBIO_IMPLEMENTATION
 
@@ -1175,6 +1179,8 @@ extern "C" {
 #include <iostream>  // HACK
 #include <sstream>
 #include <vector>
+
+#define TINYVDBIO_ASSERT(x) assert(x)
 
 #ifdef __clang__
 #pragma clang diagnostic push
@@ -1389,6 +1395,7 @@ static inline void swap8(tinyvdb::tinyvdb_int64 *val) {
   dst[6] = src[1];
   dst[7] = src[0];
 }
+
 
 ///
 /// Simple stream reader
@@ -2093,15 +2100,15 @@ bool NodeMask::load(StreamReader *sr) {
   return ret;
 }
 
-bool RootNode::ReadTopology(StreamReader *sr, const DeserializeParams &params,
-                            std::string *err) {
+bool RootNode::ReadTopology(StreamReader *sr, int level, const DeserializeParams &params,
+                            std::string *warn, std::string *err) {
   std::cout << "Root background loc " << sr->tell() << std::endl;
 
   // Read background value;
-  background_ = ReadValue(sr, node_info_.value_type());
+  background_ = ReadValue(sr, grid_layout_info_.GetInfo(level).value_type());
 
   std::cout << "background : " << background_
-            << ", size = " << GetValueTypeSize(node_info_.value_type())
+            << ", size = " << GetValueTypeSize(grid_layout_info_.GetInfo(level).value_type())
             << std::endl;
 
   sr->read4(&num_tiles_);
@@ -2123,7 +2130,7 @@ bool RootNode::ReadTopology(StreamReader *sr, const DeserializeParams &params,
     sr->read4(&vec[0]);
     sr->read4(&vec[1]);
     sr->read4(&vec[2]);
-    value = ReadValue(sr, node_info_.value_type());
+    value = ReadValue(sr, grid_layout_info_.GetInfo(level).value_type());
     sr->read_bool(&active);
 
     std::cout << "[" << n << "] vec = (" << vec[0] << ", " << vec[1] << ", "
@@ -2141,8 +2148,8 @@ bool RootNode::ReadTopology(StreamReader *sr, const DeserializeParams &params,
     // Child should be IntermediateOrLeafNode type
     //assert(child_node_info_.node_type() == NODE_TYPE_INTERMEDIATE);
 
-    IntermediateOrLeafNode child_node(child_node_desc_);
-    if (!child_node.ReadTopology(sr, params, err)) {
+    IntermediateOrLeafNode child_node(grid_layout_info_);
+    if (!child_node.ReadTopology(sr, /* level */level + 1, params, warn, err)) {
       return false;
     }
 
@@ -2156,13 +2163,13 @@ bool RootNode::ReadTopology(StreamReader *sr, const DeserializeParams &params,
   return true;
 }
 
-bool RootNode::ReadBuffer(StreamReader *sr, const DeserializeParams &params,
-                          std::string *err) {
+bool RootNode::ReadBuffer(StreamReader *sr, int level, const DeserializeParams &params,
+                          std::string *warn, std::string *err) {
   std::cout << "root readbuffer pos " << sr->tell() << std::endl;
 
   // Recursive call
   for (size_t i = 0; i < num_children_; i++) {
-    if (!child_nodes_[i].ReadBuffer(sr, params, err)) {
+    if (!child_nodes_[i].ReadBuffer(sr, level + 1, params, warn, err)) {
       return false;
     }
   }
@@ -2170,13 +2177,14 @@ bool RootNode::ReadBuffer(StreamReader *sr, const DeserializeParams &params,
   return true;
 }
 
-bool LeafNode::ReadTopology(StreamReader *sr, const DeserializeParams &params,
-                            std::string *err) {
+bool LeafNode::ReadTopology(StreamReader *sr, int level, const DeserializeParams &params,
+                            std::string *warn, std::string *err) {
   // not used.
   (void)params;
   (void)err;
+  (void)level;
 
-  bool ret = value_mask_.load(sr);
+  bool ret = value_mask_->load(sr);
 
   if (!ret) return false;
 
@@ -2186,8 +2194,8 @@ bool LeafNode::ReadTopology(StreamReader *sr, const DeserializeParams &params,
 }
 
 
-bool LeafNode::ReadBuffer(StreamReader *sr, const DeserializeParams &params,
-                          std::string *err) {
+bool LeafNode::ReadBuffer(StreamReader *sr, int level, const DeserializeParams &params,
+                          std::string *warn, std::string *err) {
   char num_buffers = 1;
 
   std::cout << "LeafNode.ReadBuffer pos = " << value_mask_end_pos_ << std::endl;
@@ -2206,24 +2214,25 @@ bool LeafNode::ReadBuffer(StreamReader *sr, const DeserializeParams &params,
     sr->read1(&num_buffers);
   }
 
-  // TODO(syoyo) clipBBox check.
+  // TODO(syoyo): clipBBox check.
 
   assert(num_voxels_ > 0);
 
-  size_t data_len = num_voxels_ * sizeof(node_info_.value_type());
+  size_t data_len = num_voxels_ * sizeof(grid_layout_info_.GetInfo(level).value_type());
   assert(data_len > 0);
 
   data_.resize(data_len);
 
   bool ret = ReadValues(sr, params.compression_flags, num_voxels_,
-                        node_info_.value_type(), &data_, err);
+                        grid_layout_info_.GetInfo(level).value_type(), &data_, err);
 
   return ret;
 }
 
 bool IntermediateOrLeafNode::ReadTopology(StreamReader *sr,
+                                const int level,
                                 const DeserializeParams &params,
-                                std::string *err) {
+                                std::string *warn, std::string *err) {
   (void)params;
 
 #if 0  // API3
@@ -2239,10 +2248,10 @@ bool IntermediateOrLeafNode::ReadTopology(StreamReader *sr,
 
   std::cout << "topo: buffer count offt = " << sr->tell() << std::endl;
 
-  child_mask_.load(sr);
+  child_mask_->load(sr);
   std::cout << "topo: child mask buffer count offt = " << sr->tell()
             << std::endl;
-  value_mask_.load(sr);
+  value_mask_->load(sr);
   std::cout << "topo: value mask buffer count offt = " << sr->tell()
             << std::endl;
 
@@ -2250,24 +2259,24 @@ bool IntermediateOrLeafNode::ReadTopology(StreamReader *sr,
       params.file_version < TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION;
 
   int NUM_VALUES =
-      1 << (3 * node_info_
+      1 << (3 * grid_layout_info_.GetInfo(level)
                     .log2dim());  // total voxel count represented by this node
 
-  std::cout << "num value_mask = " << value_mask_.SIZE << std::endl;
+  std::cout << "num value_mask = " << value_mask_->SIZE << std::endl;
   std::cout << "NUM_VALUES = " << NUM_VALUES << std::endl;
 
   // Older version will have less values
   const int num_values =
-      (old_version ? int(child_mask_.countOff()) : NUM_VALUES);
+      (old_version ? int(child_mask_->countOff()) : NUM_VALUES);
 
   {
     std::vector<unsigned char> values;
-    values.resize(GetValueTypeSize(node_info_.value_type()) *
+    values.resize(GetValueTypeSize(grid_layout_info_.GetInfo(level).value_type()) *
                   size_t(num_values));
 
     if (!ReadMaskValues(sr, params.compression_flags, params.file_version,
                         params.background, size_t(num_values),
-                        node_info_.value_type(), value_mask_, &values, err)) {
+                        grid_layout_info_.GetInfo(level).value_type(), (*value_mask_), &values, err)) {
       return false;
     }
 
@@ -2278,7 +2287,7 @@ bool IntermediateOrLeafNode::ReadTopology(StreamReader *sr,
       // loop over child flags is off.
       int n = 0;
       for (int32 i = 0; i < int32(NUM_VALUES); i++) {
-        if (child_mask_.isOff(i)) {
+        if (child_mask_->isOff(i)) {
           // mNodes[iter.pos()].setValue(values[n++]);
           n++;
         }
@@ -2287,40 +2296,45 @@ bool IntermediateOrLeafNode::ReadTopology(StreamReader *sr,
     } else {
       // loop over child flags is off.
       for (int32 i = 0; i < int32(NUM_VALUES); i++) {
-        if (child_mask_.isOff(i)) {
+        if (child_mask_->isOff(i)) {
           // mNodes[iter.pos()].setValue(values[iter.pos());
         }
       }
     }
   }
 
+  child_nodes_.resize(child_mask_->SIZE, NULL);
+  
+
   // loop over child node
-  for (int32 i = 0; i < child_mask_.SIZE; i++) {
-    if (child_mask_.isOn(i)) {
-      if (node_desc_.child_node_desc_) {
-        assert(i < child_nodes_.size());
-        if (!child_nodes_[i]->ReadTopology(sr, params, err)) {
+  for (int32 i = 0; i < child_mask_->SIZE; i++) {
+    if (child_mask_->isOn(i)) {
+      //if (node_desc_.child_node_desc_) {
+      if (1) { // HACK
+        TINYVDBIO_ASSERT(i < child_nodes_.size());
+        //child_nodes_[i] = new IntermediateOrLeafNode
+        if (!child_nodes_[i]->ReadTopology(sr, level + 1, params, warn, err)) {
           return false;
         }
       } else { // leaf
+        // TODO: add to child.
+        TINYVDBIO_ASSERT(0);
       } 
-      // TODO: add to child.
-      assert(0);
     }
   }
 
   return true;
 }
 
-bool IntermediateOrLeafNode::ReadBuffer(StreamReader *sr, const DeserializeParams &params,
-                              std::string *err) {
+bool IntermediateOrLeafNode::ReadBuffer(StreamReader *sr, int level, const DeserializeParams &params,
+                              std::string *warn, std::string *err) {
 
   size_t count = 0;
-  for (int32 i = 0; i < child_mask_.SIZE; i++) {
-    if (child_mask_.isOn(i)) {
+  for (int32 i = 0; i < child_mask_->SIZE; i++) {
+    if (child_mask_->isOn(i)) {
       std::cout << "IntermediateOrLeafNode.ReadBuffer[" << count << "]" << std::endl;
       // TODO: FIXME
-      if (!child_nodes_[i]->ReadBuffer(sr, params, err)) {
+      if (!child_nodes_[i]->ReadBuffer(sr, level + 1, params, warn, err)) {
         return false;
       }
       count++;
@@ -2576,7 +2590,7 @@ static unsigned int ReadGridCompression(StreamReader *sr,
 
 static bool ReadGrid(StreamReader *sr, const unsigned int file_version,
                      const bool half_precision, const GridDescriptor &gd,
-                     std::string *err) {
+                     std::string *warn, std::string *err) {
   // read compression per grid(optional)
   unsigned int grid_compression = ReadGridCompression(sr, file_version);
 
@@ -2597,36 +2611,45 @@ static bool ReadGrid(StreamReader *sr, const unsigned int file_version,
 
   // read topology
   if (!gd.IsInstance()) {
+    GridLayoutInfo layout_info;
+
     // TODO(syoyo): Construct node hierarchy based on header description.
     NodeInfo leaf(NODE_TYPE_LEAF, VALUE_TYPE_FLOAT, 3);
     NodeInfo intermediate2(NODE_TYPE_INTERMEDIATE, VALUE_TYPE_FLOAT, 4);
     NodeInfo intermediate1(NODE_TYPE_INTERMEDIATE, VALUE_TYPE_FLOAT, 5);
     NodeInfo root(NODE_TYPE_ROOT, VALUE_TYPE_FLOAT, 0);
 
-    NodeDesc leaf_desc(leaf, NULL);
-    NodeDesc intermediate2_desc(intermediate2, &leaf_desc);
-    NodeDesc intermediate1_desc(intermediate1, &intermediate2_desc);
+    layout_info.Add(root);
+    layout_info.Add(intermediate1);
+    layout_info.Add(intermediate2);
+    layout_info.Add(leaf);
 
-    IntermediateOrLeafNode leaf_node(leaf_desc);
-    IntermediateOrLeafNode internal2_node(intermediate2_desc);
-    IntermediateOrLeafNode internal1_node(intermediate1_desc);
-    RootNode root_node(root, intermediate1_desc);
+    //NodeDesc leaf_desc(leaf, NULL);
+    //NodeDesc intermediate2_desc(intermediate2, &leaf_desc);
+    //NodeDesc intermediate1_desc(intermediate1, &intermediate2_desc);
+
+    //IntermediateOrLeafNode leaf_node(leaf_desc);
+    //IntermediateOrLeafNode internal2_node(intermediate2_desc);
+    //IntermediateOrLeafNode internal1_node(intermediate1_desc);
+    RootNode root_node(layout_info);
 
     // TreeBase
     {
       int buffer_count;
       sr->read4(&buffer_count);
       if (buffer_count != 1) {
-        // OPENVDB_LOG_WARN("multi-buffer trees are no longer supported");
+        if (warn) {
+          (*warn) += "multi-buffer trees are no longer supported.";
+        }
       }
     }
 
-    if (!root_node.ReadTopology(sr, params, err)) {
+    if (!root_node.ReadTopology(sr, /* level */0, params, warn, err)) {
       return false;
     }
 
     // TODO(syoyo): Consider bbox(ROI)
-    if (!root_node.ReadBuffer(sr, params, err)) {
+    if (!root_node.ReadBuffer(sr, /* level */0, params, warn, err)) {
       return false;
     }
 
@@ -2897,7 +2920,7 @@ VDBStatus ReadGridDescriptors(const unsigned char *data, const size_t data_len,
 
 VDBStatus ReadGrids(const std::string &filename, const VDBHeader &header,
                     const std::map<std::string, GridDescriptor> &gd_map,
-                    std::string *err) {
+                    std::string *warn, std::string *err) {
   std::vector<unsigned char> data;
   {
     std::ifstream ifs(filename.c_str(), std::ifstream::binary);
@@ -2936,14 +2959,14 @@ VDBStatus ReadGrids(const std::string &filename, const VDBHeader &header,
              static_cast<std::streamsize>(sz));
   }
 
-  VDBStatus status = ReadGrids(data.data(), data.size(), header, gd_map, err);
+  VDBStatus status = ReadGrids(data.data(), data.size(), header, gd_map, warn, err);
   return status;
 }
 
 VDBStatus ReadGrids(const unsigned char *data, const size_t data_len,
                     const VDBHeader &header,
                     const std::map<std::string, GridDescriptor> &gd_map,
-                    std::string *err) {
+                    std::string *warn, std::string *err) {
   bool swap_endian = IsBigEndian();
   StreamReader sr(data, data_len, swap_endian);
 
@@ -2955,7 +2978,7 @@ VDBStatus ReadGrids(const unsigned char *data, const size_t data_len,
 
     sr.seek_set(gd.GridPos());
 
-    if (!ReadGrid(&sr, header.file_version, header.half_precision, gd, err)) {
+    if (!ReadGrid(&sr, header.file_version, header.half_precision, gd, warn, err)) {
       if (err) {
         (*err) += "Failed to read Grid data.\n";
       }
@@ -3064,6 +3087,4 @@ bool SaveVDB(const std::string &filename, std::string *err) {
 #pragma clang diagnostic pop
 #endif
 
-#endif
-
-#endif  // TINY_VDB_IO_H_
+#endif // TINYVDBIO_IMPLEMENTATION
