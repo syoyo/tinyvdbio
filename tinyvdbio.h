@@ -64,9 +64,6 @@ typedef long long tinyvdb_int64;
 typedef unsigned int int32;
 typedef tinyvdb_uint64 int64;
 
-// Forward decl.
-class GridLayoutInfo;
-
 #ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wpadded"
@@ -855,19 +852,19 @@ class NodeDesc {
 class GridLayoutInfo {
  public:
   GridLayoutInfo() {}
-  ~GridLayoutInfo() {}
+  //~GridLayoutInfo() {}
 
   void Add(const NodeInfo &node_info) {
     node_infos_.push_back(node_info);
   }
 
-  const NodeInfo &GetInfo(size_t level) const {
+  const NodeInfo &GetInfo(int level) const {
     //TINYVDBIO_ASSERT(level <= node_infos_.size());
-    return node_infos_[level];
+    return node_infos_[size_t(level)];
   }
 
   int NumLevels() const {
-    return node_infos_.size();
+    return int(node_infos_.size());
   }
 
   std::vector<NodeInfo> node_infos_;
@@ -937,7 +934,7 @@ class LeafNode : public Node {
 LeafNode::~LeafNode() {}
 
 LeafNode &LeafNode::Copy(const LeafNode &rhs) {
-  //value_mask_ = rhs.value_mask_;
+  value_mask_ = rhs.value_mask_;
 
   value_mask_end_pos_ = rhs.value_mask_end_pos_;
 
@@ -1003,9 +1000,8 @@ class IntermediateOrLeafNode : public Node {
   }
 #endif
 
-#if 0
   IntermediateOrLeafNode(const IntermediateOrLeafNode &rhs) :
-    Node(rhs.node_desc_.node_info_),
+    Node(rhs.grid_layout_info_)
      {
 
     origin_[0] = rhs.origin_[0];
@@ -1014,7 +1010,6 @@ class IntermediateOrLeafNode : public Node {
 
     node_values_ = rhs.node_values_;
   }
-#endif
 
 
   ~IntermediateOrLeafNode();
@@ -1035,7 +1030,6 @@ class IntermediateOrLeafNode : public Node {
  private:
   //NodeInfo child_node_info_;
   //NodeDesc node_desc_;
-  GridLayoutInfo grid_layout_info_;
 
   // child nodes are internal or leaf depending on `child_node_info_` type.
   std::vector<IntermediateOrLeafNode*> child_nodes_;
@@ -1139,7 +1133,7 @@ VDBStatus ReadGridDescriptors(const unsigned char *data, const size_t data_len,
 ///
 VDBStatus ReadGrids(const std::string &filename, const VDBHeader &header,
                     const std::map<std::string, GridDescriptor> &gd_map,
-                    std::string *err);
+                    std::string *warn, std::string *err);
 
 ///
 /// Load Grid data from memory
@@ -2181,6 +2175,7 @@ bool LeafNode::ReadTopology(StreamReader *sr, int level, const DeserializeParams
                             std::string *warn, std::string *err) {
   // not used.
   (void)params;
+  (void)warn;
   (void)err;
   (void)level;
 
@@ -2196,6 +2191,8 @@ bool LeafNode::ReadTopology(StreamReader *sr, int level, const DeserializeParams
 
 bool LeafNode::ReadBuffer(StreamReader *sr, int level, const DeserializeParams &params,
                           std::string *warn, std::string *err) {
+  (void)warn;
+
   char num_buffers = 1;
 
   std::cout << "LeafNode.ReadBuffer pos = " << value_mask_end_pos_ << std::endl;
