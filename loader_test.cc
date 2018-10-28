@@ -41,6 +41,9 @@ int main(int argc, char **argv)
 
   // 3. Read Grids
   status = tinyvdb::ReadGrids(argv[1], header, gd_map, &warn, &err);
+  if (!warn.empty()) {
+    std::cout << warn << std::endl;
+  }
   if (status != tinyvdb::TINYVDBIO_SUCCESS) {
     if (!err.empty()) {
       std::cerr << err << std::endl;
