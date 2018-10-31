@@ -103,16 +103,6 @@ class StreamReader;
 class StreamWriter;
 struct DeserializeParams;
 
-#if 0
-template<int int, int Log2Dim>
-class NodeMask
-{
- public:
-  NodeMask();
-
-};
-#else
-
 /// Return the number of on bits in the given 8-bit value.
 inline int32 CountOn(unsigned char v) {
 // Simple LUT:
@@ -620,8 +610,6 @@ class NodeMask {
   }
 };  // NodeMask
 
-#endif
-
 template <std::size_t N>
 class BitMask {
  public:
@@ -936,21 +924,6 @@ class InternalOrLeafNode : public Node {
 
     num_voxels_ = 0;
   }
-
-#if 0
-  // For internal node
-  InternalOrLeafNode(NodeInfo node_info, NodeInfo child_node_info)
-      : Node(node_info),
-        child_node_info_(child_node_info),
-        child_mask_(node_info.log2dim()),
-        value_mask_(node_info.log2dim()) {
-    origin_[0] = 0.0f;
-    origin_[1] = 0.0f;
-    origin_[2] = 0.0f;
-    node_values_.resize(child_mask_.memUsage());
-
-  }
-#endif
 
   InternalOrLeafNode(const InternalOrLeafNode &rhs) :
     Node(rhs.grid_layout_info_)
@@ -1644,16 +1617,6 @@ static Value ReadValue(StreamReader *sr, const ValueType type) {
   // ???
   return Value();
 }
-
-#if 0  // remove
-static inline std::string ReadString(std::istream &is) {
-  unsigned int size;
-  is.read(reinterpret_cast<char *>(&size), sizeof(unsigned int));
-  std::string buffer(size, ' ');
-  if (size > 0) is.read(&buffer[0], size);
-  return buffer;
-}
-#endif
 
 struct DeserializeParams {
   unsigned int file_version;
