@@ -60,6 +60,12 @@ You can define `TINYVDBIO_USE_SYSTEM_ZLIB` for system provided zlib library.
 
 ```
 $ git submodule update --init
+$ cd third_party/c-blosc/
+$ rm -rf build
+$ mkdir build
+$ cd build
+$ cmake ..
+$ make
 ```
 
 ## Notes
