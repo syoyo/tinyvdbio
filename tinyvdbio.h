@@ -908,70 +908,6 @@ class Node {
 
 Node::~Node() {}
 
-#if 0
-class LeafNode : public Node {
- public:
-  LeafNode(const GridLayoutInfo &grid_layout_info)
-      : Node(grid_layout_info) {
-    //num_voxels_ = 1 << (3 * node_info.log2dim());
-  }
-
-  ~LeafNode();
-
-  bool ReadTopology(StreamReader *sr, int level, const DeserializeParams &params,
-                    std::string *warn, std::string *err);
-
-  // bool WriteTopology(StreamReader *sr, const bool half_precision,
-  //                   const unsigned int file_version);
-
-  ///
-  /// Reads voxel data.
-  ///
-  bool ReadBuffer(StreamReader *sr, int level, const DeserializeParams &params,
-                  std::string *warn, std::string *err);
-
- private:
-
-  /// Deep copy function
-  LeafNode &Copy(const LeafNode &rhs);
-
-  NodeMask value_mask_;  // Leaf's value mask
-
-  tinyvdb_uint64 value_mask_end_pos_;  // offset to the end of value_mask(start
-                                       // of Leaf's buffer data)
-
-  std::vector<unsigned char> data_;  // Leaf's voxel data.
-  unsigned int num_voxels_;
-};
-
-LeafNode::~LeafNode() {}
-
-LeafNode &LeafNode::Copy(const LeafNode &rhs) {
-  value_mask_ = rhs.value_mask_;
-
-  value_mask_end_pos_ = rhs.value_mask_end_pos_;
-
-  data_ = rhs.data_;
-  num_voxels_ = rhs.num_voxels_;
-
-  return (*this);
-}
-#endif 
-
-#if 0  // TODO
-bool LeafNode::WriteTopology(StreamWriter *sr, const bool half_precision,
-                            const unsigned int file_version) {
-
-  // not used.
-  (void)half_precision;
-  (void)file_version;
-
-  bool ret = value_mask_.load(sr);
-
-  return ret;
-}
-#endif
-
 ///
 /// InternalOrLeaf node represents bifurcation or leaf node.
 ///
@@ -1031,6 +967,8 @@ class InternalOrLeafNode : public Node {
 
     node_values_ = rhs.node_values_;
 
+    value_mask_ = rhs.value_mask_;
+
     data_ = rhs.data_;
   }
 
@@ -1046,6 +984,8 @@ class InternalOrLeafNode : public Node {
     num_voxels_ = rhs.num_voxels_;
 
     node_values_ = rhs.node_values_;
+
+    value_mask_ = rhs.value_mask_;
 
     data_ = rhs.data_;
 
@@ -1227,7 +1167,7 @@ const int kOPENVDB_MAGIC = 0x56444220;
 #endif
 
 ///
-/// TinyVDB file version.
+/// TinyVDBIO's default file version.
 ///
 const unsigned int kTINYVDB_FILE_VERSION = 220;
 
@@ -1877,8 +1817,13 @@ static bool DecompressBlosc(unsigned char *dst, unsigned long uncompressed_size,
 static bool ReadAndDecompressData(StreamReader *sr, unsigned char *dst_data,
                                   size_t element_size, size_t count,
                                   unsigned int compression_mask,
-                                  std::string *err) {
+                                  std::string *warn, std::string *err) {
+
+  (void)warn;
+
   if (compression_mask & COMPRESS_BLOSC) {
+    std::cout << "HACK: BLOSLC" << std::endl;
+
 #if defined(TINYVDBIO_USE_BLOSC)
     // Read the size of the compressed data.
     // A negative size indicates uncompressed data.
@@ -1918,6 +1863,7 @@ static bool ReadAndDecompressData(StreamReader *sr, unsigned char *dst_data,
     std::cout << "blosc decode ok" << std::endl;
 
 #else
+    std::cout << "HACK: BLOSLC is TODO" << std::endl;
     // TODO(syoyo):
     if (err) {
       (*err) += "Decoding BLOSC is not supported in this build.\n";
@@ -1929,6 +1875,7 @@ static bool ReadAndDecompressData(StreamReader *sr, unsigned char *dst_data,
     // A negative size indicates uncompressed data.
     tinyvdb_int64 numZippedBytes;
     sr->read8(&numZippedBytes);
+    std::cout << "numZippedBytes = " << numZippedBytes << std::endl;
 
     if (numZippedBytes <= 0) {
       if (dst_data == NULL) {
@@ -1959,6 +1906,8 @@ static bool ReadAndDecompressData(StreamReader *sr, unsigned char *dst_data,
       }
     }
   } else {
+    std::cout << "HACK: uncompressed" << std::endl;
+    std::cout << "  elem_size = " << element_size << ", count = " << count << std::endl;
     if (dst_data == NULL) {
       // seek over this data.
       sr->seek_set(sr->tell() + element_size * count);
@@ -1991,7 +1940,7 @@ static bool ReadAndDecompressData(StreamReader *sr, unsigned char *dst_data,
 
 static bool ReadValues(StreamReader *sr, const unsigned int compression_flags,
                        size_t num_values, ValueType value_type,
-                       std::vector<unsigned char> *values, std::string *err) {
+                       std::vector<unsigned char> *values, std::string *warn, std::string *err) {
   // usually fp16 or fp32
   TINYVDBIO_ASSERT((value_type == VALUE_TYPE_FLOAT) || (value_type == VALUE_TYPE_HALF));
 
@@ -2000,10 +1949,11 @@ static bool ReadValues(StreamReader *sr, const unsigned int compression_flags,
 
   // read data.
   if (seek) {
+    // should not be 'seek' at the monent.
     TINYVDBIO_ASSERT(0);
   } else {
     if (!ReadAndDecompressData(sr, values->data(), GetValueTypeSize(value_type),
-                               num_values, compression_flags, err)) {
+                               num_values, compression_flags, warn, err)) {
       return false;
     }
   }
@@ -2017,6 +1967,7 @@ static bool ReadMaskValues(StreamReader *sr,
                            const Value background, size_t num_values,
                            ValueType value_type, NodeMask value_mask,
                            std::vector<unsigned char> *values,
+                           std::string *warn,
                            std::string *err) {
   // Advance stream position when destination buffer is null.
   const bool seek = (values == NULL);
@@ -2076,13 +2027,16 @@ static bool ReadMaskValues(StreamReader *sr,
   if (mask_compressed && per_node_flag != NO_MASK_AND_ALL_VALS &&
       file_version >= TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
     read_count = size_t(value_mask.countOn());
+    std::cout << "3 metadata. read count = " << read_count << std::endl;
   }
+
+  std::cout << "read num = " << read_count << std::endl;
 
   std::vector<unsigned char> tmp_buf(read_count * GetValueTypeSize(value_type));
 
   // Read mask data.
   if (!ReadAndDecompressData(sr, tmp_buf.data(), GetValueTypeSize(value_type),
-                             size_t(read_count), compression_flags, err)) {
+                             size_t(read_count), compression_flags, warn, err)) {
     return false;
   }
 
@@ -2211,66 +2165,6 @@ bool RootNode::ReadBuffer(StreamReader *sr, int level, const DeserializeParams &
   return true;
 }
 
-#if 0
-bool LeafNode::ReadTopology(StreamReader *sr, int level, const DeserializeParams &params,
-                            std::string *warn, std::string *err) {
-  // not used.
-  (void)params;
-  (void)warn;
-  (void)err;
-  (void)level;
-
-  std::cout << "leaf : level " << level << std::endl;
-
-  value_mask_.Alloc(grid_layout_info_.GetNodeInfo(level).log2dim());
-  bool ret = value_mask_.load(sr);
-
-  if (!ret) return false;
-
-  value_mask_end_pos_ = sr->tell();
-
-  return ret;
-}
-
-
-bool LeafNode::ReadBuffer(StreamReader *sr, int level, const DeserializeParams &params,
-                          std::string *warn, std::string *err) {
-  (void)warn;
-
-  char num_buffers = 1;
-
-  std::cout << "LeafNode.ReadBuffer pos = " << value_mask_end_pos_ << std::endl;
-
-  // Seek over the value mask.
-  sr->seek_set(value_mask_end_pos_);
-
-  if (params.file_version < TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
-    int coord[3];
-
-    // Read coordinate origin and num buffers.
-    sr->read4(&coord[0]);
-    sr->read4(&coord[1]);
-    sr->read4(&coord[2]);
-
-    sr->read1(&num_buffers);
-  }
-
-  // TODO(syoyo): clipBBox check.
-
-  TINYVDBIO_ASSERT(num_voxels_ > 0);
-
-  size_t data_len = num_voxels_ * sizeof(grid_layout_info_.GetNodeInfo(level).value_type());
-  TINYVDBIO_ASSERT(data_len > 0);
-
-  data_.resize(data_len);
-
-  bool ret = ReadValues(sr, params.compression_flags, num_voxels_,
-                        grid_layout_info_.GetNodeInfo(level).value_type(), &data_, err);
-
-  return ret;
-}
-#endif
-
 bool InternalOrLeafNode::ReadTopology(StreamReader *sr,
                                 const int level,
                                 const DeserializeParams &params,
@@ -2326,7 +2220,7 @@ bool InternalOrLeafNode::ReadTopology(StreamReader *sr,
 
       if (!ReadMaskValues(sr, params.compression_flags, params.file_version,
                           params.background, size_t(num_values),
-                          grid_layout_info_.GetNodeInfo(level).value_type(), value_mask_, &values, err)) {
+                          grid_layout_info_.GetNodeInfo(level).value_type(), value_mask_, &values, warn, err)) {
         if (err) {
           std::stringstream ss;
           ss << "Failed to read mask values in ReadTopology. level = " << level << std::endl;
@@ -2428,9 +2322,12 @@ bool InternalOrLeafNode::ReadBuffer(StreamReader *sr, int level, const Deseriali
     char num_buffers = 1;
 
     std::cout << "LeafNode.ReadBuffer pos = " << sr->tell() << std::endl;
+    std::cout << " value_mask_.memUsage = " << value_mask_.memUsage() << std::endl;
 
     // Seek over the value mask.
     sr->seek_from_currect(value_mask_.memUsage());
+
+    std::cout << "is pos = " << sr->tell() << std::endl;
 
     if (params.file_version < TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
       int coord[3];
@@ -2445,18 +2342,39 @@ bool InternalOrLeafNode::ReadBuffer(StreamReader *sr, int level, const Deseriali
 
     }
 
+    const bool mask_compressed = params.compression_flags & COMPRESS_ACTIVE_MASK;
+
+    const bool seek = false;
+
+    char per_node_flag = NO_MASK_AND_ALL_VALS;
+    if (params.file_version >= TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
+      if (seek && !mask_compressed) {
+        // selection mask and/or inactive value is saved.
+        sr->seek_set(sr->tell() + 1);  // advance 1 byte.
+      } else {
+        sr->read1(&per_node_flag);
+      }
+    }
+
     // TODO(syoyo): clipBBox check.
+
 
     TINYVDBIO_ASSERT(num_voxels_ > 0);
 
-    size_t data_len = num_voxels_ * sizeof(grid_layout_info_.GetNodeInfo(level).value_type());
-    TINYVDBIO_ASSERT(data_len > 0);
+    size_t read_count = num_voxels_;
 
-    std::cout << "data len = " << data_len << std::endl;
-    data_.resize(data_len);
 
-    bool ret = ReadValues(sr, params.compression_flags, num_voxels_,
-                          grid_layout_info_.GetNodeInfo(level).value_type(), &data_, err);
+    if (mask_compressed && per_node_flag != NO_MASK_AND_ALL_VALS &&
+        (params.file_version >= TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION)) {
+      read_count = size_t(value_mask_.countOn());
+    }
+
+    std::cout << "read_count = " << read_count << std::endl;
+
+    data_.resize(read_count * GetValueTypeSize(grid_layout_info_.GetNodeInfo(level).value_type()));
+
+    bool ret = ReadValues(sr, params.compression_flags, read_count,
+                          grid_layout_info_.GetNodeInfo(level).value_type(), &data_, warn, err);
 
     return ret;
   }
