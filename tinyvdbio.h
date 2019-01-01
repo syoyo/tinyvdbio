@@ -103,6 +103,31 @@ class StreamReader;
 class StreamWriter;
 struct DeserializeParams;
 
+///
+///
+///
+struct VoxelNode
+{
+  // local bbox
+  uint32_t bmin[3];
+  uint32_t bmax[3];
+
+  bool is_leaf;  
+
+  uint32_t num_divs[3]; // The number of voxel divisions
+
+  // intermediate(branch)
+  // offset to child VoxelNode
+  std::vector<size_t> child_offsets;  // len = num_divs[0] * num_divs[1] * num_divs[2]
+
+  // leaf
+
+  // TODO(syoyo): Support various voxel data type.
+  uint32_t num_channels;
+  std::vector<float> voxels; // len = num_divs[0] * num_divs[1] * num_divs[2] * num_channels
+};
+
+
 /// Return the number of on bits in the given 8-bit value.
 inline int32 CountOn(unsigned char v) {
 // Simple LUT:
