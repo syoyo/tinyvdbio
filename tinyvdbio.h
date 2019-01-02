@@ -103,30 +103,6 @@ class StreamReader;
 class StreamWriter;
 struct DeserializeParams;
 
-///
-///
-///
-struct VoxelNode
-{
-  // local bbox
-  uint32_t bmin[3];
-  uint32_t bmax[3];
-
-  bool is_leaf;  
-
-  uint32_t num_divs[3]; // The number of voxel divisions
-
-  // intermediate(branch)
-  // offset to child VoxelNode
-  std::vector<size_t> child_offsets;  // len = num_divs[0] * num_divs[1] * num_divs[2]
-
-  // leaf
-
-  // TODO(syoyo): Support various voxel data type.
-  uint32_t num_channels;
-  std::vector<float> voxels; // len = num_divs[0] * num_divs[1] * num_divs[2] * num_channels
-};
-
 
 /// Return the number of on bits in the given 8-bit value.
 inline int32 CountOn(unsigned char v) {
@@ -1052,6 +1028,75 @@ class RootNode : public Node {
   Value background_;  // Background(region of un-interested area) value
   unsigned int num_tiles_;
   unsigned int num_children_;
+};
+
+///
+/// Simple Voxel node.
+/// (integer grid)
+///
+struct VoxelNode
+{
+  // local bbox
+  // must be dividable by each element of `num_divs` for intermediate node.
+  uint32_t bmin[3];
+  uint32_t bmax[3];
+
+  bool is_leaf;  
+
+  uint32_t num_divs[3]; // The number of voxel divisions
+
+  //
+  // intermediate(branch)
+  //
+  double background;  // background value(for empty leaf)
+
+  // offset to child VoxelNode
+  // 0 = empty leaf
+  std::vector<size_t> child_offsets;  // len = num_divs[0] * num_divs[1] * num_divs[2]
+
+  //
+  // leaf
+  //
+
+  // TODO(syoyo): Support various voxel data type.
+  uint32_t num_channels;
+  std::vector<float> voxels; // len = num_divs[0] * num_divs[1] * num_divs[2] * num_channels
+};
+
+class VoxelTree
+{
+ public:
+  
+  ///
+  /// Returns tree is valid(got success to build tree?)
+  ///
+  bool Valid();
+
+  ///
+  /// Builds Voxel tree from RootNode class
+  ///
+  bool Build(const RootNode &root);
+
+  ///
+  /// Sample voxel value for a given coordinate.
+  /// Returns voxel value or background value when `loc` coordinate is empty. 
+  ///
+  /// @param[in] loc Sample coordinate.
+  /// @param[in] req_channels Required channels of voxel data. 
+  /// @param[out] out Sampled voxel value(length = req_channels)
+  ///
+  void Sample(const uint32_t loc[3], const uint8_t req_channels, float *out);
+
+ private:
+
+  bool valid_ = false;
+
+  double bmin_[3]; // bounding min of root voxel node(in world coordinate).
+  double bmax_[3]; // bounding max of root voxel node(in world coordinate).
+  double pitch_[3];  // voxel pitch at leaf level. Assume all voxel has same pitch size.
+  
+
+  std::vector<VoxelNode> nodes_; // [0] = root node
 };
 
 #ifdef __clang__
