@@ -981,6 +981,15 @@ class InternalOrLeafNode : public Node {
   bool ReadBuffer(StreamReader *sr, int level, const DeserializeParams &params,
                   std::string *warn, std::string *err);
 
+
+  const std::vector<InternalOrLeafNode> &GetChildNodes() const {
+    return child_nodes_;
+  }
+
+  std::vector<InternalOrLeafNode> &GetChildNodes() {
+    return child_nodes_;
+  }
+
  private:
 
   NodeMask value_mask_;
@@ -1021,6 +1030,14 @@ class RootNode : public Node {
   bool ReadBuffer(StreamReader *sr, int level, const DeserializeParams &params,
                   std::string *warn, std::string *err);
 
+  const std::vector<InternalOrLeafNode> &GetChildNodes() const {
+    return child_nodes_;
+  }
+
+  std::vector<InternalOrLeafNode> &GetChildNodes() {
+    return child_nodes_;
+  }
+  
  private:
 
   std::vector<InternalOrLeafNode> child_nodes_;
@@ -1088,6 +1105,9 @@ class VoxelTree
   void Sample(const uint32_t loc[3], const uint8_t req_channels, float *out);
 
  private:
+
+  // Build tree recursively.
+  void BuildTree(const InternalOrLeafNode& root, int depth);
 
   bool valid_ = false;
 
@@ -3140,6 +3160,29 @@ bool SaveVDB(const std::string &filename, std::string *err) {
   WriteVDBHeader(os);
   // if filemane
 
+  return true;
+}
+
+void VoxelTree::BuildTree(const InternalOrLeafNode& root, int depth)
+{
+  (void)root;
+  (void)depth; 
+}
+
+bool VoxelTree::Build(const RootNode &root)
+{
+  nodes_.clear();
+
+  // root node
+  VoxelNode node;
+
+  nodes_.push_back(node);
+
+  for (size_t i = 0; i < root.GetChildNodes().size(); i++) {
+    BuildTree(root.GetChildNodes()[i], 0);
+  }
+
+  valid_ = true;
   return true;
 }
 
