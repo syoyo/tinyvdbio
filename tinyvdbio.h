@@ -39,6 +39,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <limits>
 
 namespace tinyvdb {
 
@@ -64,6 +65,72 @@ typedef long long tinyvdb_int64;
 typedef unsigned int int32;
 typedef tinyvdb_uint64 int64;
 
+
+// For voxel coordinate.
+struct Vec3i {
+  int x;
+  int y;
+  int z;
+};
+
+class Boundsi {
+ public:
+  Boundsi() {
+    bmin.x = std::numeric_limits<int>::max();
+    bmin.y = std::numeric_limits<int>::max();
+    bmin.z = std::numeric_limits<int>::max();
+
+    bmax.x = -std::numeric_limits<int>::max();
+    bmax.y = -std::numeric_limits<int>::max();
+    bmax.z = -std::numeric_limits<int>::max();
+  }
+
+  ///
+  /// Returns true if given coordinate is within this bound
+  ///
+  bool Contains(const Vec3i &v) {
+    if ((bmin.x <= v.x) && (v.x <= bmax.x) &&
+        (bmin.y <= v.y) && (v.y <= bmax.y) &&
+        (bmin.z <= v.z) && (v.z <= bmax.z)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  ///
+  /// Returns true if given bounding box overlaps with this bound.
+  ///
+  bool Overlaps(const Boundsi& b) {
+    if (Contains(b.bmin) || Contains(b.bmax)) {
+      return true;
+    }
+    return false;
+  }
+
+  ///
+  /// Compute union of two bounds.
+  ///
+  static Boundsi Union(const Boundsi& a, const Boundsi &b) {
+    Boundsi bound;
+
+    bound.bmin.x = std::min(a.bmin.x, b.bmin.x);
+    bound.bmin.y = std::min(a.bmin.y, b.bmin.y);
+    bound.bmin.z = std::min(a.bmin.z, b.bmin.z);
+
+    bound.bmax.x = std::max(a.bmax.x, b.bmax.x);
+    bound.bmax.y = std::max(a.bmax.y, b.bmax.y);
+    bound.bmax.z = std::max(a.bmax.z, b.bmax.z);
+    
+    return bound;
+  }
+
+  friend std::ostream& operator<<(std::ostream &os, const Boundsi &bound);
+
+  Vec3i bmin;
+  Vec3i bmax;
+
+};
 
 // TODO(syoyo): Move to IMPLEMENTATION
 #define TINYVDBIO_ASSERT(x) assert(x)
@@ -641,11 +708,11 @@ class GridDescriptor {
 
   bool SaveFloatAsHalf() const { return save_float_as_half_; }
 
-  tinyvdb_uint64 GridPos() const { return grid_pos_; }
+  tinyvdb_uint64 GridByteOffset() const { return grid_byte_offset_; }
 
-  tinyvdb_uint64 BlockPos() const { return block_pos_; }
+  tinyvdb_uint64 BlockByteOffset() const { return block_byte_offset_; }
 
-  tinyvdb_uint64 EndPos() const { return end_pos_; }
+  tinyvdb_uint64 EndByteOffset() const { return end_byte_offset_; }
 
   static std::string AddSuffix(const std::string &name, int n);
   static std::string StripSuffix(const std::string &name);
@@ -663,9 +730,9 @@ class GridDescriptor {
   std::string grid_type_;
 
   bool save_float_as_half_;  // use fp16?
-  tinyvdb_uint64 grid_pos_;
-  tinyvdb_uint64 block_pos_;
-  tinyvdb_uint64 end_pos_;
+  tinyvdb_uint64 grid_byte_offset_;
+  tinyvdb_uint64 block_byte_offset_;
+  tinyvdb_uint64 end_byte_offset_;
 };
 
 typedef enum {
@@ -868,6 +935,23 @@ class GridLayoutInfo {
     return int(node_infos_.size());
   }
 
+  // Compute global voxel size for a given level.
+  unsigned int ComputeGlobalVoxelSize(int level) {
+    if (level >= NumLevels()) {
+      // Invalid input
+      return 0;
+    }
+
+    unsigned int voxel_size = 1 << node_infos_[size_t(level)].log2dim();
+    for (int l = level + 1; l < NumLevels(); l++) {
+      unsigned int sz = 1 << node_infos_[size_t(l)].log2dim();
+
+      voxel_size *= sz;
+    }   
+
+    return voxel_size;
+  }
+
   std::vector<NodeInfo> node_infos_;
 };
 
@@ -875,6 +959,10 @@ class InternalOrLeafNode;
 
 class Node {
  public:
+  ///
+  /// Requires GridLayoutInfo, which contains whole hierarcical grid
+  /// layout information.
+  ///
   Node(const GridLayoutInfo &layout_info) : grid_layout_info_(layout_info) {}
   Node &operator=(const Node &rhs) {
     grid_layout_info_ = rhs.grid_layout_info_;
@@ -890,6 +978,10 @@ class Node {
 
   virtual bool ReadBuffer(StreamReader *sr, int level, const DeserializeParams &params,
                           std::string *warn, std::string *err) = 0;
+
+  const GridLayoutInfo& GetGridLayoutInfo() const {
+    return grid_layout_info_;
+  }
 
  protected:
   GridLayoutInfo grid_layout_info_;
@@ -990,6 +1082,10 @@ class InternalOrLeafNode : public Node {
     return child_nodes_;
   }
 
+  unsigned int GetVoxelSize() const {
+    return value_mask_.DIM;
+  }
+
  private:
 
   NodeMask value_mask_;
@@ -1038,8 +1134,14 @@ class RootNode : public Node {
     return child_nodes_;
   }
   
+  const std::vector<Boundsi> &GetChildBounds() const {
+    return child_bounds_;
+  }
+
  private:
 
+  // store voxel bounds of child node in global coordinate.
+  std::vector<Boundsi> child_bounds_;
   std::vector<InternalOrLeafNode> child_nodes_;
 
   Value background_;  // Background(region of un-interested area) value
@@ -1055,12 +1157,12 @@ struct VoxelNode
 {
   // local bbox
   // must be dividable by each element of `num_divs` for intermediate node.
-  uint32_t bmin[3];
-  uint32_t bmax[3];
+  unsigned int bmin[3];
+  unsigned int bmax[3];
 
   bool is_leaf;  
 
-  uint32_t num_divs[3]; // The number of voxel divisions
+  unsigned int num_divs[3]; // The number of voxel divisions
 
   //
   // intermediate(branch)
@@ -1076,7 +1178,7 @@ struct VoxelNode
   //
 
   // TODO(syoyo): Support various voxel data type.
-  uint32_t num_channels;
+  unsigned int num_channels;
   std::vector<float> voxels; // len = num_divs[0] * num_divs[1] * num_divs[2] * num_channels
 };
 
@@ -1091,8 +1193,9 @@ class VoxelTree
 
   ///
   /// Builds Voxel tree from RootNode class
+  /// Returns false when failed to build tree(e.g. input `root` is invalid) and store error message to `err`.
   ///
-  bool Build(const RootNode &root);
+  bool Build(const RootNode &root, std::string *err);
 
   ///
   /// Sample voxel value for a given coordinate.
@@ -1102,14 +1205,14 @@ class VoxelTree
   /// @param[in] req_channels Required channels of voxel data. 
   /// @param[out] out Sampled voxel value(length = req_channels)
   ///
-  void Sample(const uint32_t loc[3], const uint8_t req_channels, float *out);
+  void Sample(const unsigned int loc[3], const unsigned char req_channels, float *out);
 
  private:
 
   // Build tree recursively.
   void BuildTree(const InternalOrLeafNode& root, int depth);
 
-  bool valid_ = false;
+  bool valid_;
 
   double bmin_[3]; // bounding min of root voxel node(in world coordinate).
   double bmax_[3]; // bounding max of root voxel node(in world coordinate).
@@ -1222,6 +1325,12 @@ extern "C" {
 #endif
 
 namespace tinyvdb {
+
+std::ostream& operator<<(std::ostream &os, const Boundsi &bound) {
+  os << "Boundsi bmin(" << bound.bmin.x << ", " << bound.bmin.y << ", " << bound.bmin.z << "), bmax(" << bound.bmax.x << ", " << bound.bmax.y << ", " << bound.bmax.z << ")";
+  return os;
+}
+
 
 const int kOPENVDB_MAGIC = 0x56444220;
 
@@ -2176,10 +2285,10 @@ bool RootNode::ReadTopology(StreamReader *sr, int level, const DeserializeParams
 
   // Read child nodes.
   for (unsigned int n = 0; n < num_children_; n++) {
-    int vec[3];
-    sr->read4(&vec[0]);
-    sr->read4(&vec[1]);
-    sr->read4(&vec[2]);
+    Vec3i coord;
+    sr->read4(&coord.x);
+    sr->read4(&coord.y);
+    sr->read4(&coord.z);
 
     // Child should be InternalOrLeafNode type
     TINYVDBIO_ASSERT((level + 1) < grid_layout_info_.NumLevels());
@@ -2192,9 +2301,29 @@ bool RootNode::ReadTopology(StreamReader *sr, int level, const DeserializeParams
 
     child_nodes_.push_back(child_node);
 
-#if 0  // TODO
-    //mTable[Coord(vec)] = NodeStruct(*child);
-#endif
+    std::cout << "root.child[" << n << "] vec = (" << coord.x << ", " << coord.y << ", " << coord.z << std::endl;
+
+    unsigned int global_voxel_size = grid_layout_info_.ComputeGlobalVoxelSize(0);
+    Boundsi bounds;
+    bounds.bmin = coord;
+    bounds.bmax.x = coord.x + int(global_voxel_size);
+    bounds.bmax.y = coord.y + int(global_voxel_size);
+    bounds.bmax.z = coord.y + int(global_voxel_size);
+    child_bounds_.push_back(bounds);
+  }
+
+  // HACK
+  {
+    VoxelTree tree;
+    std::string _err;
+
+    bool ret = tree.Build(*this, &_err);
+    if (!_err.empty()) {
+      std::cerr << _err << std::endl;
+    }
+    if (!ret) {
+      return false;
+    }
   }
 
   return true;
@@ -2434,7 +2563,7 @@ bool InternalOrLeafNode::ReadBuffer(StreamReader *sr, int level, const Deseriali
 }
 
 GridDescriptor::GridDescriptor()
-    : save_float_as_half_(false), grid_pos_(0), block_pos_(0), end_pos_(0) {}
+    : save_float_as_half_(false), grid_byte_offset_(0), block_byte_offset_(0), end_byte_offset_(0) {}
 
 GridDescriptor::GridDescriptor(const std::string &name,
                                const std::string &grid_type,
@@ -2443,9 +2572,9 @@ GridDescriptor::GridDescriptor(const std::string &name,
       unique_name_(name),
       grid_type_(grid_type),
       save_float_as_half_(save_float_as_half),
-      grid_pos_(0),
-      block_pos_(0),
-      end_pos_(0) {}
+      grid_byte_offset_(0),
+      block_byte_offset_(0),
+      end_byte_offset_(0) {}
 
 // GridDescriptor::GridDescriptor(const GridDescriptor &rhs) {
 //}
@@ -2506,13 +2635,13 @@ bool GridDescriptor::Read(StreamReader *sr, const unsigned int file_version,
   // if (grid) grid->setSaveFloatAsHalf(mSaveFloatAsHalf);
 
   // Read in the offsets.
-  sr->read8(&grid_pos_);
-  sr->read8(&block_pos_);
-  sr->read8(&end_pos_);
+  sr->read8(&grid_byte_offset_);
+  sr->read8(&block_byte_offset_);
+  sr->read8(&end_byte_offset_);
 
-  std::cout << "grid_pos = " << grid_pos_ << std::endl;
-  std::cout << "block_pos = " << block_pos_ << std::endl;
-  std::cout << "end_pos = " << end_pos_ << std::endl;
+  std::cout << "grid_byte_offset = " << grid_byte_offset_ << std::endl;
+  std::cout << "block_byte_offset = " << block_byte_offset_ << std::endl;
+  std::cout << "end_byte_offset = " << end_byte_offset_ << std::endl;
 
   return true;
 }
@@ -2611,7 +2740,7 @@ static bool ReadGridDescriptors(StreamReader *sr,
     (*gd_map)[gd.GridName()] = gd;
 
     // Skip forward to the next descriptor.
-    sr->seek_set(gd.EndPos());
+    sr->seek_set(gd.EndByteOffset());
   }
 
   return true;
@@ -2743,7 +2872,7 @@ static bool ReadGrid(StreamReader *sr, const unsigned int file_version,
   }
 
   // Move to grid position
-  sr->seek_set(tinyvdb_uint64(gd.GridPos()));
+  sr->seek_set(tinyvdb_uint64(gd.GridByteOffset()));
     
   return true;
 }
@@ -3058,7 +3187,7 @@ VDBStatus ReadGrids(const unsigned char *data, const size_t data_len,
   for (; it != itEnd; it++) {
     const GridDescriptor &gd = it->second;
 
-    sr.seek_set(gd.GridPos());
+    sr.seek_set(gd.GridByteOffset());
 
     if (!ReadGrid(&sr, header.file_version, header.half_precision, gd, warn, err)) {
       if (err) {
@@ -3169,18 +3298,36 @@ void VoxelTree::BuildTree(const InternalOrLeafNode& root, int depth)
   (void)depth; 
 }
 
-bool VoxelTree::Build(const RootNode &root)
+bool VoxelTree::Build(const RootNode &root, std::string *err)
 {
   nodes_.clear();
+
+  const GridLayoutInfo& grid_layout_info = root.GetGridLayoutInfo();
+  (void)grid_layout_info;
+
+  // toplevel.
+  // Usually divided into 2*2*2 region for 5_4_3 tree configuration
+  // (each region has 4096^3 voxel size)
+  if (root.GetChildBounds().size() != root.GetChildNodes().size()) {
+    if (err) {
+      (*err) = "Invalid RootNode.\n";
+    }
+    return false;
+  }
 
   // root node
   VoxelNode node;
 
   nodes_.push_back(node);
 
+  Boundsi root_bounds;
   for (size_t i = 0; i < root.GetChildNodes().size(); i++) {
+    // TODO(syoyo): Check overlap
+    root_bounds = Boundsi::Union(root_bounds, root.GetChildBounds()[i]);
     BuildTree(root.GetChildNodes()[i], 0);
   }
+
+  std::cout << root_bounds << std::endl;
 
   valid_ = true;
   return true;

@@ -39,6 +39,8 @@ int main(int argc, char **argv)
     return EXIT_FAILURE;
   }
 
+  std::cout << "# of grid descriptors = " << gd_map.size() << std::endl;
+
   // 3. Read Grids
   status = tinyvdb::ReadGrids(argv[1], header, gd_map, &warn, &err);
   if (!warn.empty()) {
@@ -50,6 +52,7 @@ int main(int argc, char **argv)
     }
     return EXIT_FAILURE;
   }
+
 
   std::cout << "Load OK" << std::endl;
 
