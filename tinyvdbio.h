@@ -40,31 +40,9 @@
 #include <string>
 #include <vector>
 #include <limits>
+#include <sstream>
 
 namespace tinyvdb {
-
-#if __cplusplus > 199711L
-// C++11
-typedef uint64_t tinyvdb_uint64;
-typedef int64_t tinyvdb_int64;
-#else
-// Although `long long` is not a standard type pre C++11, assume it is defined
-// as a compiler's extension.
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wc++11-long-long"
-#endif
-typedef unsigned long long tinyvdb_uint64;
-typedef long long tinyvdb_int64;
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-#endif
-
-// For OpenVDB code compatibility
-typedef unsigned int int32;
-typedef tinyvdb_uint64 int64;
-
 
 // For voxel coordinate.
 struct Vec3i {
@@ -132,6 +110,249 @@ class Boundsi {
 
 };
 
+
+// --- vvv --------------------------------------------------
+
+/*
+The MIT License (MIT)
+
+Copyright (c) 2019 Syoyo Fujita.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+///
+/// @brief dynamically allocatable bitset
+///
+class dynamic_bitset {
+ public:
+  dynamic_bitset() = default;
+  dynamic_bitset(dynamic_bitset &&) = default;
+  dynamic_bitset(const dynamic_bitset &) = default;
+
+  dynamic_bitset &operator=(const dynamic_bitset &) = default;
+
+  ~dynamic_bitset() = default;
+
+  ///
+  /// @brief Construct dynamic_bitset with given number of bits.
+  ///
+  /// @param[in] nbits The number of bits to use.
+  /// @param[in] value Initize bitfield with this value.
+  ///
+  explicit dynamic_bitset(size_t nbits, uint64_t value) {
+    _num_bits = nbits;
+
+    size_t num_bytes;
+    if (nbits < 8) {
+      num_bytes = 1;
+    } else {
+      num_bytes = 1 + (nbits - 1) / 8;
+    }
+
+    _data.resize(num_bytes);
+
+    // init with zeros
+    std::fill_n(_data.begin(), _data.size(), 0);
+
+    // init with `value`.
+
+    if (nbits < sizeof(uint64_t)) {
+
+      assert(num_bytes < 3);
+
+      uint64_t masked_value = value & ((1 << (nbits +1)) - 1);
+
+      for (size_t i = 0; i < _data.size(); i++) {
+        _data[i] = (masked_value >> (i * 8)) & 0xff;
+      }
+
+    } else {
+      for (size_t i = 0; i < sizeof(uint64_t); i++) {
+        _data[i] = (value >> (i * 8)) & 0xff;
+      }
+    }
+
+  }
+
+  ///
+  /// Equivalent to std::bitset::any()
+  ///
+  bool any() const {
+    for (size_t i = 0; i < _num_bits; i++) {
+      if ((*this)[i]) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  ///
+  /// Equivalent to std::bitset::all()
+  ///
+  bool all() const {
+    for (size_t i = 0; i < _num_bits; i++) {
+      if (false == (*this)[i]) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  ///
+  /// Equivalent to std::bitset::none()
+  ///
+  bool none() const {
+    for (size_t i = 0; i < _num_bits; i++) {
+      if ((*this)[i]) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  ///
+  /// Equivalent to std::bitset::flip()
+  ///
+  dynamic_bitset &flip() {
+    for (size_t i = 0; i < _num_bits; i++) {
+      set(i, (*this)[i] ? false : true);
+    }
+
+    return (*this);
+  }
+
+  ///
+  /// @brief Resize dynamic_bitset.
+  ///
+  /// @details Resize dynamic_bitset. Resize behavior is similar to std::vector::resize.
+  ///
+  /// @param[in] nbits The number of bits to use.
+  ///
+  void resize(size_t nbits) {
+
+    _num_bits = nbits;
+
+    size_t num_bytes;
+    if (nbits < 8) {
+      num_bytes = 1;
+    } else {
+      num_bytes = 1 + (nbits - 1) / 8;
+    }
+
+    _data.resize(num_bytes);
+  }
+
+  ///
+  /// @return The number of bits that are set to `true`
+  ///
+  uint32_t count() const {
+
+    uint32_t c = 0;
+
+    for (size_t i = 0; i < _num_bits; i++) {
+      c += (*this)[i] ? 1 : 0;
+    }
+
+    return c;
+  }
+
+  bool test(size_t pos) const {
+    // TODO(syoyo): Do range check and throw when out-of-bounds access.
+    return (*this)[pos];
+  }
+
+  void reset() {
+    std::fill_n(_data.begin(), _data.size(), 0);
+  }
+
+  // Set all bitfield with `value`
+  void setall(bool value) {
+    for (size_t i = 0; i < _num_bits; i++) {
+      set(i, value);
+    }
+  }
+
+  void set(size_t pos, bool value = true) {
+    size_t byte_loc = pos / 8;
+    uint8_t offset = pos % 8;
+
+    uint8_t bitfield = uint8_t(1 << offset);
+
+    if (value == true) {
+      // bit on
+      _data[byte_loc] |= bitfield;
+    } else {
+      // turn off bit
+      _data[byte_loc] &= (~bitfield);
+    }
+  }
+
+  std::string to_string() const {
+    std::stringstream ss;
+
+    for (size_t i = 0; i < _num_bits; i++) {
+      ss << ((*this)[_num_bits - i - 1] ? "1" : "0");
+    }
+
+    return ss.str();
+  }
+
+  bool operator[](size_t pos) const {
+    size_t byte_loc = pos / 8;
+    size_t offset = pos % 8;
+
+    return (_data[byte_loc] >> offset) & 0x1;
+  }
+
+  // Return the number of bits.
+  size_t nbits() const {
+    return _num_bits;
+  }
+
+  // Return storage size.
+  size_t size() const {
+    return _data.size();
+  }
+
+  // Return memory address of bitfield(as an byte array)
+  const uint8_t *data() const {
+    return _data.data();
+  }
+
+  // Return memory address of bitfield(as an byte array)
+  uint8_t *data() {
+    return _data.data();
+  }
+
+ private:
+  size_t _num_bits{0};
+
+  // bitfields are reprentated as an array of bytes.
+  std::vector<uint8_t> _data;
+};
+
+// --^^^---------------------------------------------------------------
+
 // TODO(syoyo): Move to IMPLEMENTATION
 #define TINYVDBIO_ASSERT(x) assert(x)
 
@@ -143,14 +364,14 @@ class Boundsi {
 #endif
 
 typedef struct {
-  unsigned int file_version;
-  unsigned int major_version;
-  unsigned int minor_version;
+  uint32_t file_version;
+  uint32_t major_version;
+  uint32_t minor_version;
   // bool has_grid_offsets;
   bool is_compressed;
   bool half_precision;
   std::string uuid;
-  tinyvdb_uint64 offset_to_data;  // Byte offset to VDB data
+  uint64_t offset_to_data;  // Byte offset to VDB data
 } VDBHeader;
 
 typedef struct {
@@ -170,9 +391,10 @@ class StreamReader;
 class StreamWriter;
 struct DeserializeParams;
 
+#if 0 // TODO(syoyo): Remove
 
 /// Return the number of on bits in the given 8-bit value.
-inline int32 CountOn(unsigned char v) {
+inline int32_t CountOn(unsigned char v) {
 // Simple LUT:
 #ifndef _MSC_VER  // Visual C++ doesn't guarantee thread-safe initialization of
                   // local statics
@@ -192,7 +414,7 @@ inline int32 CountOn(unsigned char v) {
 #undef COUNTONB2
 
   // Sequentially clear least significant bits
-  // int32 c;
+  // int32_t c;
   // for (c = 0; v; c++)  v &= v - 0x01U;
   // return c;
 
@@ -201,22 +423,22 @@ inline int32 CountOn(unsigned char v) {
 }
 
 /// Return the number of off bits in the given 8-bit value.
-inline int32 CountOff(unsigned char v) {
+inline int32_t CountOff(unsigned char v) {
   return CountOn(static_cast<unsigned char>(~v));
 }
 
 /// Return the number of on bits in the given 32-bit value.
-inline int32 CountOn(int32 v) {
+inline int32_t CountOn(int32_t v) {
   v = v - ((v >> 1) & 0x55555555U);
   v = (v & 0x33333333U) + ((v >> 2) & 0x33333333U);
   return (((v + (v >> 4)) & 0xF0F0F0FU) * 0x1010101U) >> 24;
 }
 
 /// Return the number of off bits in the given 32-bit value.
-inline int32 CountOff(int32 v) { return CountOn(~v); }
+inline int32_t CountOff(int32_t v) { return CountOn(~v); }
 
 /// Return the number of on bits in the given 64-bit value.
-inline int32 CountOn(int64 v) {
+inline int32_t CountOn(int64 v) {
   v = v - ((v >> 1) & 0x5555555555555555);
   v = (v & 0x3333333333333333) + ((v >> 2) & 0x3333333333333333);
   return static_cast<int32>(
@@ -224,10 +446,10 @@ inline int32 CountOn(int64 v) {
 }
 
 /// Return the number of off bits in the given 64-bit value.
-inline int32 CountOff(int64 v) { return CountOn(~v); }
+inline int32_t CountOff(int64 v) { return CountOn(~v); }
 
 /// Return the least significant on bit of the given 8-bit value.
-inline int32 FindLowestOn(unsigned char v) {
+inline int32_t FindLowestOn(unsigned char v) {
   TINYVDBIO_ASSERT(v);
 #ifndef _MSC_VER  // Visual C++ doesn't guarantee thread-safe initialization of
                   // local statics
@@ -238,7 +460,7 @@ inline int32 FindLowestOn(unsigned char v) {
 }
 
 /// Return the least significant on bit of the given 32-bit value.
-inline int32 FindLowestOn(int32 v) {
+inline int32_t FindLowestOn(int32_t v) {
   TINYVDBIO_ASSERT(v);
   // return ffs(v);
 #ifndef _MSC_VER  // Visual C++ doesn't guarantee thread-safe initialization of
@@ -252,7 +474,7 @@ inline int32 FindLowestOn(int32 v) {
 }
 
 /// Return the least significant on bit of the given 64-bit value.
-inline int32 FindLowestOn(int64 v) {
+inline int32_t FindLowestOn(int64 v) {
   TINYVDBIO_ASSERT(v);
   // return ffsll(v);
 #ifndef _MSC_VER  // Visual C++ doesn't guarantee thread-safe initialization of
@@ -269,7 +491,7 @@ inline int32 FindLowestOn(int64 v) {
 }
 
 /// Return the most significant on bit of the given 32-bit value.
-inline int32 FindHighestOn(int32 v) {
+inline int32_t FindHighestOn(int32_t v) {
 #ifndef _MSC_VER  // Visual C++ doesn't guarantee thread-safe initialization of
                   // local statics
   static
@@ -284,6 +506,7 @@ inline int32 FindHighestOn(int32 v) {
   v |= v >> 16;
   return DeBruijn[int32(v * 0x07C4ACDDU) >> 27];
 }
+#endif
 
 ////////////////////////////////////////
 
@@ -317,68 +540,72 @@ class NodeMask {
  public:
   // static_assert(Log2Dim > 2, "expected NodeMask template specialization, got
   // base template");
-  int32 LOG2DIM;
-  int32 DIM;
-  int32 SIZE;
-  int32 WORD_COUNT;
+  int32_t LOG2DIM;
+  int32_t DIM;
+  int32_t BITSIZE;
+  //int32_t WORD_COUNT;
 
-  // static const int32 LOG2DIM = Log2Dim;
-  // static const int32 DIM = 1 << Log2Dim;
-  // static const int32 SIZE = 1 << 3 * Log2Dim;
-  // static const int32 WORD_COUNT = SIZE >> 6;  // 2^6=64
+  // static const int32_t LOG2DIM = Log2Dim;
+  // static const int32_t DIM = 1 << Log2Dim;
+  // static const int32_t SIZE = 1 << 3 * Log2Dim;
+  // static const int32_t WORD_COUNT = SIZE >> 6;  // 2^6=64
   // using Word = int64;
-  typedef int64 Word;
+  //typedef int64 Word;
 
  private:
   // The bits are represented as a linear array of Words, and the
   // size of a Word is 32 or 64 bits depending on the platform.
   // The BIT_MASK is defined as the number of bits in a Word - 1
-  // static const int32 BIT_MASK   = sizeof(void*) == 8 ? 63 : 31;
-  // static const int32 LOG2WORD   = BIT_MASK == 63 ? 6 : 5;
-  // static const int32 WORD_COUNT = SIZE >> LOG2WORD;
+  // static const int32_t BIT_MASK   = sizeof(void*) == 8 ? 63 : 31;
+  // static const int32_t LOG2WORD   = BIT_MASK == 63 ? 6 : 5;
+  // static const int32_t WORD_COUNT = SIZE >> LOG2WORD;
   // using Word = boost::mpl::if_c<BIT_MASK == 63, int64, int32>::type;
 
-  std::vector<Word> mWords;  // only member data!
+  //std::vector<Word> mWords;  // only member data!
+  //std::vector<bool> bits;
+  dynamic_bitset bits;
 
  public:
 
   NodeMask() {
     LOG2DIM = 0;
     DIM = 0;
-    SIZE = 0;
-    WORD_COUNT = 0;
+    BITSIZE = 0;
+    //WORD_COUNT = 0;
   }
 
-  void Alloc(int32 log2dim) {
+  void Alloc(int32_t log2dim) {
     LOG2DIM = log2dim;
     DIM = 1 << log2dim;
-    SIZE = 1 << 3 * log2dim;
-    WORD_COUNT = SIZE >> 6;  // 2^6=64
+    BITSIZE = 1 << 3 * log2dim;
+    //WORD_COUNT = SIZE >> 6;  // 2^6=64
 
-    mWords.resize(WORD_COUNT);
+    //mWords.resize(WORD_COUNT);
 
-    this->setOff();
+    bits.resize(size_t(BITSIZE));
+    bits.reset();
   }
 
   /// Default constructor sets all bits off
-  NodeMask(int32 log2dim) {
+  NodeMask(int32_t log2dim) {
     LOG2DIM = log2dim;
     DIM = 1 << log2dim;
-    SIZE = 1 << 3 * log2dim;
-    WORD_COUNT = SIZE >> 6;  // 2^6=64
+    BITSIZE = 1 << 3 * log2dim;
+    //WORD_COUNT = SIZE >> 6;  // 2^6=64
 
-    mWords.resize(WORD_COUNT);
-
-    this->setOff();
+    bits.resize(size_t(BITSIZE));
+    bits.reset();
   }
+
   /// All bits are set to the specified state
-  NodeMask(int32 log2dim, bool on) {
+  NodeMask(int32_t log2dim, bool on) {
     LOG2DIM = log2dim;
     DIM = 1 << log2dim;
-    SIZE = 1 << 3 * log2dim;
-    WORD_COUNT = SIZE >> 6;  // 2^6=64
+    BITSIZE = 1 << 3 * log2dim;
+    //WORD_COUNT = SIZE >> 6;  // 2^6=64
 
-    this->set(on);
+    bits.resize(size_t(BITSIZE));
+    bits.setall(on);
   }
   /// Copy constructor
   NodeMask(const NodeMask &other) { *this = other; }
@@ -388,12 +615,13 @@ class NodeMask {
   NodeMask &operator=(const NodeMask &other) {
     LOG2DIM = other.LOG2DIM;
     DIM = other.DIM;
-    SIZE = other.SIZE;
-    WORD_COUNT = other.WORD_COUNT;
+    BITSIZE = other.BITSIZE;
+    //WORD_COUNT = other.WORD_COUNT;
 
-    mWords = other.mWords;
+    bits = other.bits;
+    //mWords = other.mWords;
     return *this;
-    // int32 n = WORD_COUNT;
+    // int32_t n = WORD_COUNT;
     // const Word* w2 = other.mWords;
     // for (Word *w1 = mWords; n--; ++w1, ++w2) *w1 = *w2;
   }
@@ -409,7 +637,6 @@ class NodeMask {
     OffIterator endOff() const       { return OffIterator(SIZE,this); }
     DenseIterator beginDense() const { return DenseIterator(0,this); }
     DenseIterator endDense() const   { return DenseIterator(SIZE,this); }
-#endif
 
   bool operator==(const NodeMask &other) const {
     int n = int(WORD_COUNT);
@@ -420,7 +647,9 @@ class NodeMask {
   }
 
   bool operator!=(const NodeMask &other) const { return !(*this == other); }
+#endif
 
+#if 0 // remove
   //
   // Bitwise logical operations
   //
@@ -436,7 +665,7 @@ class NodeMask {
   const NodeMask &foreach (const NodeMask &other, const WordOp &op) {
     Word *w1 = mWords.data();
     const Word *w2 = other.mWords.data();
-    for (int32 n = WORD_COUNT; n--; ++w1, ++w2) op(*w1, *w2);
+    for (int32_t n = WORD_COUNT; n--; ++w1, ++w2) op(*w1, *w2);
     return *this;
   }
   template <typename WordOp>
@@ -444,7 +673,7 @@ class NodeMask {
                            const WordOp &op) {
     Word *w1 = mWords.data();
     const Word *w2 = other1.mWords.data(), *w3 = other2.mWords.data();
-    for (int32 n = WORD_COUNT; n--; ++w1, ++w2, ++w3) op(*w1, *w2, *w3);
+    for (int32_t n = WORD_COUNT; n--; ++w1, ++w2, ++w3) op(*w1, *w2, *w3);
     return *this;
   }
   template <typename WordOp>
@@ -453,7 +682,7 @@ class NodeMask {
     Word *w1 = mWords.data();
     const Word *w2 = other1.mWords.data(), *w3 = other2.mWords.data(),
                *w4 = other3.mWords.data();
-    for (int32 n = WORD_COUNT; n--; ++w1, ++w2, ++w3, ++w4)
+    for (int32_t n = WORD_COUNT; n--; ++w1, ++w2, ++w3, ++w4)
       op(*w1, *w2, *w3, *w4);
     return *this;
   }
@@ -461,28 +690,28 @@ class NodeMask {
   const NodeMask &operator&=(const NodeMask &other) {
     Word *w1 = mWords.data();
     const Word *w2 = other.mWords.data();
-    for (int32 n = WORD_COUNT; n--; ++w1, ++w2) *w1 &= *w2;
+    for (int32_t n = WORD_COUNT; n--; ++w1, ++w2) *w1 &= *w2;
     return *this;
   }
   /// @brief Bitwise union
   const NodeMask &operator|=(const NodeMask &other) {
     Word *w1 = mWords.data();
     const Word *w2 = other.mWords.data();
-    for (int32 n = WORD_COUNT; n--; ++w1, ++w2) *w1 |= *w2;
+    for (int32_t n = WORD_COUNT; n--; ++w1, ++w2) *w1 |= *w2;
     return *this;
   }
   /// @brief Bitwise difference
   const NodeMask &operator-=(const NodeMask &other) {
     Word *w1 = mWords.data();
     const Word *w2 = other.mWords.data();
-    for (int32 n = WORD_COUNT; n--; ++w1, ++w2) *w1 &= ~*w2;
+    for (int32_t n = WORD_COUNT; n--; ++w1, ++w2) *w1 &= ~*w2;
     return *this;
   }
   /// @brief Bitwise XOR
   const NodeMask &operator^=(const NodeMask &other) {
     Word *w1 = mWords.data();
     const Word *w2 = other.mWords.data();
-    for (int32 n = WORD_COUNT; n--; ++w1, ++w2) *w1 ^= *w2;
+    for (int32_t n = WORD_COUNT; n--; ++w1, ++w2) *w1 ^= *w2;
     return *this;
   }
   NodeMask operator!() const {
@@ -506,56 +735,60 @@ class NodeMask {
     m ^= other;
     return m;
   }
+#endif
 
   /// Return the byte size of this NodeMask
-  int32 memUsage() const {
-    return static_cast<int32>(WORD_COUNT * sizeof(Word));
+  size_t memUsage() const {
+    return bits.size();
   }
+
+#if 0
   /// Return the total number of on bits
-  int32 countOn() const {
-    int32 sum = 0, n = WORD_COUNT;
+  int32_t countOn() const {
+    int32_t sum = 0, n = WORD_COUNT;
     std::cout << "cnt = " << n << ", sz = " << mWords.size() << std::endl;
     for (const Word *w = mWords.data(); n--; ++w) sum += CountOn(*w);
     return sum;
   }
+
   /// Return the total number of on bits
-  int32 countOff() const { return SIZE - this->countOn(); }
+  int32_t countOff() const { return SIZE - this->countOn(); }
   /// Set the <i>n</i>th  bit on
-  void setOn(int32 n) {
+  void setOn(int32_t n) {
     TINYVDBIO_ASSERT((n >> 6) < WORD_COUNT);
     mWords[n >> 6] |= Word(1) << (n & 63);
   }
   /// Set the <i>n</i>th bit off
-  void setOff(int32 n) {
+  void setOff(int32_t n) {
     TINYVDBIO_ASSERT((n >> 6) < WORD_COUNT);
     mWords[n >> 6] &= ~(Word(1) << (n & 63));
   }
   /// Set the <i>n</i>th bit to the specified state
-  void set(int32 n, bool On) { On ? this->setOn(n) : this->setOff(n); }
+  void set(int32_t n, bool On) { On ? this->setOn(n) : this->setOff(n); }
   /// Set all bits to the specified state
   void set(bool on) {
     const Word state = on ? ~Word(0) : Word(0);
-    int32 n = WORD_COUNT;
+    int32_t n = WORD_COUNT;
     for (Word *w = mWords.data(); n--; ++w) *w = state;
   }
   /// Set all bits on
   void setOn() {
-    int32 n = WORD_COUNT;
+    int32_t n = WORD_COUNT;
     for (Word *w = mWords.data(); n--; ++w) *w = ~Word(0);
   }
   /// Set all bits off
   void setOff() {
-    int32 n = WORD_COUNT;
+    int32_t n = WORD_COUNT;
     for (Word *w = mWords.data(); n--; ++w) *w = Word(0);
   }
   /// Toggle the state of the <i>n</i>th bit
-  void toggle(int32 n) {
+  void toggle(int32_t n) {
     TINYVDBIO_ASSERT((n >> 6) < WORD_COUNT);
     mWords[n >> 6] ^= Word(1) << (n & 63);
   }
   /// Toggle the state of all bits in the mask
   void toggle() {
-    int32 n = WORD_COUNT;
+    int32_t n = WORD_COUNT;
     for (Word *w = mWords.data(); n--; ++w) *w = ~*w;
   }
   /// Set the first bit on
@@ -567,12 +800,26 @@ class NodeMask {
   /// Set the last bit off
   void setLastOff() { this->setOff(SIZE - 1); }
   /// Return @c true if the <i>n</i>th bit is on
-  bool isOn(int32 n) const {
-    TINYVDBIO_ASSERT((n >> 6) < WORD_COUNT);
-    return 0 != (mWords[n >> 6] & (Word(1) << (n & 63)));
+#endif
+
+  uint32_t nbits() const {
+    return uint32_t(bits.nbits());
   }
-  /// Return @c true if the <i>n</i>th bit is off
-  bool isOff(int32 n) const { return !this->isOn(n); }
+
+  uint32_t count_on() const {
+    return uint32_t(bits.count());
+  }
+
+  bool is_on(int32_t n) const {
+    TINYVDBIO_ASSERT(n < int32_t(bits.nbits()));
+    return bits.test(size_t(n));
+  }
+
+  bool is_off(int32_t n) const {
+    return !this->is_on(n);
+  }
+
+#if 0
   /// Return @c true if all the bits are on
   bool isOn() const {
     int n = int(WORD_COUNT);
@@ -597,15 +844,15 @@ class NodeMask {
     while (w < n && *w == mWords[0]) ++w;
     return w == n;
   }
-  int32 findFirstOn() const {
-    int32 n = 0;
+  int32_t findFirstOn() const {
+    int32_t n = 0;
     const Word *w = mWords.data();
     for (; n < WORD_COUNT && !*w; ++w, ++n)
       ;
     return n == WORD_COUNT ? SIZE : (n << 6) + FindLowestOn(*w);
   }
-  int32 findFirstOff() const {
-    int32 n = 0;
+  int32_t findFirstOff() const {
+    int32_t n = 0;
     const Word *w = mWords.data();
     for (; n < WORD_COUNT && !~*w; ++w, ++n)
       ;
@@ -625,23 +872,25 @@ class NodeMask {
     return reinterpret_cast<WordT *>(mWords)[n];
   }
   //@}
+#endif
 
-  void save(std::ostream &os) const {
-    os.write(reinterpret_cast<const char *>(mWords.data()), this->memUsage());
-  }
+  //void save(std::ostream &os) const {
+  //  os.write(reinterpret_cast<const char *>(bits.data()), this->size());
+  //}
   bool load(StreamReader *sr);
 
   void seek(std::istream &is) const {
-    is.seekg(this->memUsage(), std::ios_base::cur);
+    is.seekg(int64_t(bits.size()), std::ios_base::cur);
   }
   /// @brief simple print method for debugging
   void printInfo(std::ostream &os = std::cout) const {
     os << "NodeMask: Dim=" << DIM << " Log2Dim=" << LOG2DIM
-       << " Bit count=" << SIZE << " word count=" << WORD_COUNT << std::endl;
+       << " Bit count=" << BITSIZE << std::endl;
   }
-  void printBits(std::ostream &os = std::cout, int32 max_out = 80u) const {
-    const int32 n = (SIZE > max_out ? max_out : SIZE);
-    for (int32 i = 0; i < n; ++i) {
+#if 0
+  void printBits(std::ostream &os = std::cout, int32_t max_out = 80u) const {
+    const int32_t n = (SIZE > max_out ? max_out : SIZE);
+    for (int32_t i = 0; i < n; ++i) {
       if (!(i & 63))
         os << "||";
       else if (!(i % 8))
@@ -650,15 +899,15 @@ class NodeMask {
     }
     os << "|" << std::endl;
   }
-  void printAll(std::ostream &os = std::cout, int32 max_out = 80u) const {
+  void printAll(std::ostream &os = std::cout, int32_t max_out = 80u) const {
     this->printInfo(os);
     this->printBits(os, max_out);
   }
 
-  int32 findNextOn(int32 start) const {
-    int32 n = start >> 6;              // initiate
+  int32_t findNextOn(int32_t start) const {
+    int32_t n = start >> 6;              // initiate
     if (n >= WORD_COUNT) return SIZE;  // check for out of bounds
-    int32 m = start & 63;
+    int32_t m = start & 63;
     Word b = mWords[n];
     if (b & (Word(1) << m)) return start;          // simpel case: start is on
     b &= ~Word(0) << m;                            // mask out lower bits
@@ -666,16 +915,17 @@ class NodeMask {
     return (!b ? SIZE : (n << 6) + FindLowestOn(b));  // catch last word=0
   }
 
-  int32 findNextOff(int32 start) const {
-    int32 n = start >> 6;              // initiate
+  int32_t findNextOff(int32_t start) const {
+    int32_t n = start >> 6;              // initiate
     if (n >= WORD_COUNT) return SIZE;  // check for out of bounds
-    int32 m = start & 63;
+    int32_t m = start & 63;
     Word b = ~mWords[n];
     if (b & (Word(1) << m)) return start;           // simpel case: start is on
     b &= ~Word(0) << m;                             // mask out lower bits
     while (!b && ++n < WORD_COUNT) b = ~mWords[n];  // find next none-zero word
     return (!b ? SIZE : (n << 6) + FindLowestOn(b));  // catch last word=0
   }
+#endif
 };  // NodeMask
 
 template <std::size_t N>
@@ -708,11 +958,11 @@ class GridDescriptor {
 
   bool SaveFloatAsHalf() const { return save_float_as_half_; }
 
-  tinyvdb_uint64 GridByteOffset() const { return grid_byte_offset_; }
+  uint64_t GridByteOffset() const { return grid_byte_offset_; }
 
-  tinyvdb_uint64 BlockByteOffset() const { return block_byte_offset_; }
+  uint64_t BlockByteOffset() const { return block_byte_offset_; }
 
-  tinyvdb_uint64 EndByteOffset() const { return end_byte_offset_; }
+  uint64_t EndByteOffset() const { return end_byte_offset_; }
 
   static std::string AddSuffix(const std::string &name, int n);
   static std::string StripSuffix(const std::string &name);
@@ -720,7 +970,7 @@ class GridDescriptor {
   ///
   /// Read GridDescriptor from a stream.
   ///
-  bool Read(StreamReader *sr, const unsigned int file_version,
+  bool Read(StreamReader *sr, const uint32_t file_version,
             std::string *err);
 
  private:
@@ -730,9 +980,9 @@ class GridDescriptor {
   std::string grid_type_;
 
   bool save_float_as_half_;  // use fp16?
-  tinyvdb_uint64 grid_byte_offset_;
-  tinyvdb_uint64 block_byte_offset_;
-  tinyvdb_uint64 end_byte_offset_;
+  uint64_t grid_byte_offset_;
+  uint64_t block_byte_offset_;
+  uint64_t end_byte_offset_;
 };
 
 typedef enum {
@@ -899,19 +1149,19 @@ class TreeDesc
 
 class NodeInfo {
  public:
-  NodeInfo(NodeType node_type, ValueType value_type, int32 log2dim)
+  NodeInfo(NodeType node_type, ValueType value_type, int32_t log2dim)
       : node_type_(node_type), value_type_(value_type), log2dim_(log2dim) {}
 
   NodeType node_type() const { return node_type_; }
 
   ValueType value_type() const { return value_type_; }
 
-  int32 log2dim() const { return log2dim_; }
+  int32_t log2dim() const { return log2dim_; }
 
  private:
   NodeType node_type_;
   ValueType value_type_;
-  int32 log2dim_;
+  int32_t log2dim_;
 };
 
 ///
@@ -936,15 +1186,15 @@ class GridLayoutInfo {
   }
 
   // Compute global voxel size for a given level.
-  unsigned int ComputeGlobalVoxelSize(int level) {
+  uint32_t ComputeGlobalVoxelSize(int level) {
     if (level >= NumLevels()) {
       // Invalid input
       return 0;
     }
 
-    unsigned int voxel_size = 1 << node_infos_[size_t(level)].log2dim();
+    uint32_t voxel_size = 1 << node_infos_[size_t(level)].log2dim();
     for (int l = level + 1; l < NumLevels(); l++) {
-      unsigned int sz = 1 << node_infos_[size_t(l)].log2dim();
+      uint32_t sz = 1 << node_infos_[size_t(l)].log2dim();
 
       voxel_size *= sz;
     }
@@ -1013,7 +1263,7 @@ class InternalOrLeafNode : public Node {
     origin_[0] = 0.0f;
     origin_[1] = 0.0f;
     origin_[2] = 0.0f;
-    //node_values_.resize(child_mask_.memUsage());
+    //node_values_.resize(child_mask_.size());
 
     num_voxels_ = 0;
   }
@@ -1082,8 +1332,8 @@ class InternalOrLeafNode : public Node {
     return child_nodes_;
   }
 
-  unsigned int GetVoxelSize() const {
-    return value_mask_.DIM;
+  uint32_t GetVoxelSize() const {
+    return uint32_t(value_mask_.DIM);
   }
 
  private:
@@ -1102,7 +1352,7 @@ class InternalOrLeafNode : public Node {
   // For leaf node
 
   std::vector<unsigned char> data_;  // Leaf's voxel data.
-  unsigned int num_voxels_;
+  uint32_t num_voxels_;
 
 };
 
@@ -1145,8 +1395,8 @@ class RootNode : public Node {
   std::vector<InternalOrLeafNode> child_nodes_;
 
   Value background_;  // Background(region of un-interested area) value
-  unsigned int num_tiles_;
-  unsigned int num_children_;
+  uint32_t num_tiles_;
+  uint32_t num_children_;
 };
 
 ///
@@ -1157,12 +1407,12 @@ struct VoxelNode
 {
   // local bbox
   // must be dividable by each element of `num_divs` for intermediate node.
-  unsigned int bmin[3];
-  unsigned int bmax[3];
+  uint32_t bmin[3];
+  uint32_t bmax[3];
 
   bool is_leaf;
 
-  unsigned int num_divs[3]; // The number of voxel divisions
+  uint32_t num_divs[3]; // The number of voxel divisions
 
   //
   // intermediate(branch)
@@ -1178,7 +1428,7 @@ struct VoxelNode
   //
 
   // TODO(syoyo): Support various voxel data type.
-  unsigned int num_channels;
+  uint32_t num_channels;
   std::vector<float> voxels; // len = num_divs[0] * num_divs[1] * num_divs[2] * num_channels
 };
 
@@ -1205,7 +1455,7 @@ class VoxelTree
   /// @param[in] req_channels Required channels of voxel data.
   /// @param[out] out Sampled voxel value(length = req_channels)
   ///
-  void Sample(const unsigned int loc[3], const unsigned char req_channels, float *out);
+  void Sample(const uint32_t loc[3], const unsigned char req_channels, float *out);
 
  private:
 
@@ -1341,7 +1591,7 @@ const int kOPENVDB_MAGIC = 0x56444220;
 ///
 /// TinyVDBIO's default file version.
 ///
-const unsigned int kTINYVDB_FILE_VERSION = 220;
+const uint32_t kTINYVDB_FILE_VERSION = 220;
 
 // File format versions(identical to OPENVDB_FILE_VERSION_***).
 // This should be same with OpenVDB's implementation.
@@ -1377,17 +1627,17 @@ const char *SEP = "\x1e";  // ASCII "record separator"
 // https://gist.github.com/rygorous/2156668
 // Reuse MINIZ_LITTLE_ENDIAN flag from miniz.
 union FP32 {
-  unsigned int u;
+  uint32_t u;
   float f;
   struct {
 #if MINIZ_LITTLE_ENDIAN
-    unsigned int Mantissa : 23;
-    unsigned int Exponent : 8;
-    unsigned int Sign : 1;
+    uint32_t Mantissa : 23;
+    uint32_t Exponent : 8;
+    uint32_t Sign : 1;
 #else
-    unsigned int Sign : 1;
-    unsigned int Exponent : 8;
-    unsigned int Mantissa : 23;
+    uint32_t Sign : 1;
+    uint32_t Exponent : 8;
+    uint32_t Mantissa : 23;
 #endif
   } s;
 };
@@ -1401,13 +1651,13 @@ union FP16 {
   unsigned short u;
   struct {
 #if MINIZ_LITTLE_ENDIAN
-    unsigned int Mantissa : 10;
-    unsigned int Exponent : 5;
-    unsigned int Sign : 1;
+    uint32_t Mantissa : 10;
+    uint32_t Exponent : 5;
+    uint32_t Sign : 1;
 #else
-    unsigned int Sign : 1;
-    unsigned int Exponent : 5;
-    unsigned int Mantissa : 10;
+    uint32_t Sign : 1;
+    uint32_t Exponent : 5;
+    uint32_t Mantissa : 10;
 #endif
   } s;
 };
@@ -1418,12 +1668,12 @@ union FP16 {
 
 static inline FP32 half_to_float(FP16 h) {
   static const FP32 magic = {113 << 23};
-  static const unsigned int shifted_exp = 0x7c00
+  static const uint32_t shifted_exp = 0x7c00
                                           << 13;  // exponent mask after shift
   FP32 o;
 
   o.u = (h.u & 0x7fffU) << 13U;           // exponent/mantissa bits
-  unsigned int exp_ = shifted_exp & o.u;  // just the exponent
+  uint32_t exp_ = shifted_exp & o.u;  // just the exponent
   o.u += (127 - 15) << 23;                // exponent adjust
 
   // handle exponent special cases
@@ -1459,13 +1709,13 @@ static inline FP16 float_to_half_full(FP32 f) {
     {
       if ((14 - newexp) <= 24)  // Mantissa might be non-zero
       {
-        unsigned int mant = f.s.Mantissa | 0x800000;  // Hidden 1 bit
+        uint32_t mant = f.s.Mantissa | 0x800000;  // Hidden 1 bit
         o.s.Mantissa = mant >> (14 - newexp);
         if ((mant >> (13 - newexp)) & 1)  // Check for rounding
           o.u++;  // Round, might overflow into exp bit, but this is OK
       }
     } else {
-      o.s.Exponent = static_cast<unsigned int>(newexp);
+      o.s.Exponent = static_cast<uint32_t>(newexp);
       o.s.Mantissa = f.s.Mantissa >> 13;
       if (f.s.Mantissa & 0x1000)  // Check for rounding
         o.u++;                    // Round, might overflow to inf, this is OK
@@ -1485,8 +1735,8 @@ static inline void swap2(unsigned short *val) {
   dst[1] = src[0];
 }
 
-static inline void swap4(unsigned int *val) {
-  unsigned int tmp = *val;
+static inline void swap4(uint32_t *val) {
+  uint32_t tmp = *val;
   unsigned char *dst = reinterpret_cast<unsigned char *>(val);
   unsigned char *src = reinterpret_cast<unsigned char *>(&tmp);
 
@@ -1507,8 +1757,8 @@ static inline void swap4(int *val) {
   dst[3] = src[0];
 }
 
-static inline void swap8(tinyvdb::tinyvdb_uint64 *val) {
-  tinyvdb::tinyvdb_uint64 tmp = (*val);
+static inline void swap8(uint64_t *val) {
+  uint64_t tmp = (*val);
   unsigned char *dst = reinterpret_cast<unsigned char *>(val);
   unsigned char *src = reinterpret_cast<unsigned char *>(&tmp);
 
@@ -1522,8 +1772,8 @@ static inline void swap8(tinyvdb::tinyvdb_uint64 *val) {
   dst[7] = src[0];
 }
 
-static inline void swap8(tinyvdb::tinyvdb_int64 *val) {
-  tinyvdb::tinyvdb_int64 tmp = (*val);
+static inline void swap8(int64_t *val) {
+  int64_t tmp = (*val);
   unsigned char *dst = reinterpret_cast<unsigned char *>(val);
   unsigned char *src = reinterpret_cast<unsigned char *>(&tmp);
 
@@ -1571,7 +1821,7 @@ class StreamReader {
     return true;
   }
 
-  size_t read(const size_t n, const uint64_t dst_len, unsigned char *dst) {
+  size_t read(const size_t n, const uint64_t dst_len, uint8_t *dst) {
     size_t len = n;
     if ((idx_ + len) > length_) {
       len = length_ - idx_;
@@ -1649,13 +1899,13 @@ class StreamReader {
     return true;
   }
 
-  bool read4(unsigned int *ret) {
+  bool read4(uint32_t *ret) {
     if ((idx_ + 4) > length_) {
       return false;
     }
 
-    unsigned int val =
-        *(reinterpret_cast<const unsigned int *>(&binary_[idx_]));
+    uint32_t val =
+        *(reinterpret_cast<const uint32_t *>(&binary_[idx_]));
 
     if (swap_endian_) {
       swap4(&val);
@@ -1684,13 +1934,13 @@ class StreamReader {
     return true;
   }
 
-  bool read8(tinyvdb_uint64 *ret) {
+  bool read8(uint64_t *ret) {
     if ((idx_ + 8) > length_) {
       return false;
     }
 
-    tinyvdb_uint64 val =
-        *(reinterpret_cast<const tinyvdb_uint64 *>(&binary_[idx_]));
+    uint64_t val =
+        *(reinterpret_cast<const uint64_t *>(&binary_[idx_]));
 
     if (swap_endian_) {
       swap8(&val);
@@ -1702,13 +1952,13 @@ class StreamReader {
     return true;
   }
 
-  bool read8(tinyvdb_int64 *ret) {
+  bool read8(int64_t *ret) {
     if ((idx_ + 8) > length_) {
       return false;
     }
 
-    tinyvdb_int64 val =
-        *(reinterpret_cast<const tinyvdb_int64 *>(&binary_[idx_]));
+    int64_t val =
+        *(reinterpret_cast<const int64_t *>(&binary_[idx_]));
 
     if (swap_endian_) {
       swap8(&val);
@@ -1741,7 +1991,7 @@ class StreamReader {
     }
 
     double value;
-    if (!read8(reinterpret_cast<tinyvdb_uint64 *>(&value))) {
+    if (!read8(reinterpret_cast<uint64_t *>(&value))) {
       return false;
     }
 
@@ -1818,15 +2068,15 @@ static Value ReadValue(StreamReader *sr, const ValueType type) {
 }
 
 struct DeserializeParams {
-  unsigned int file_version;
-  unsigned int compression_flags;
+  uint32_t file_version;
+  uint32_t compression_flags;
   bool half_precision;
   char __pad__[7];
   Value background;
 };
 
 static inline std::string ReadString(StreamReader *sr) {
-  unsigned int size = 0;
+  uint32_t size = 0;
   sr->read4(&size);
   if (size > 0) {
     std::string buffer(size, ' ');
@@ -1837,14 +2087,14 @@ static inline std::string ReadString(StreamReader *sr) {
 }
 
 static inline void WriteString(std::ostream &os, const std::string &name) {
-  unsigned int size = static_cast<unsigned int>(name.size());
-  os.write(reinterpret_cast<char *>(&size), sizeof(unsigned int));
+  uint32_t size = static_cast<uint32_t>(name.size());
+  os.write(reinterpret_cast<char *>(&size), sizeof(uint32_t));
   os.write(&name[0], size);
 }
 
 static inline bool ReadMetaBool(StreamReader *sr) {
   char c = 0;
-  unsigned int size;
+  uint32_t size;
   sr->read4(&size);
   if (size == 1) {
     sr->read(1, 1, reinterpret_cast<unsigned char *>(&c));
@@ -1854,16 +2104,16 @@ static inline bool ReadMetaBool(StreamReader *sr) {
 
 static inline float ReadMetaFloat(StreamReader *sr) {
   float f = 0.0f;
-  unsigned int size;
+  uint32_t size;
   sr->read4(&size);
   if (size == sizeof(float)) {
-    sr->read4(reinterpret_cast<unsigned int *>(&f));
+    sr->read4(reinterpret_cast<uint32_t *>(&f));
   }
   return f;
 }
 
 static inline void ReadMetaVec3i(StreamReader *sr, int v[3]) {
-  unsigned int size;
+  uint32_t size;
   sr->read4(&size);
   if (size == 3 * sizeof(int)) {
     sr->read4(&v[0]);
@@ -1873,7 +2123,7 @@ static inline void ReadMetaVec3i(StreamReader *sr, int v[3]) {
 }
 
 static inline void ReadMetaVec3d(StreamReader *sr, double v[3]) {
-  unsigned int size;
+  uint32_t size;
   sr->read4(&size);
   if (size == 3 * sizeof(double)) {
     sr->read_double(&v[0]);
@@ -1882,12 +2132,12 @@ static inline void ReadMetaVec3d(StreamReader *sr, double v[3]) {
   }
 }
 
-static inline tinyvdb_int64 ReadMetaInt64(StreamReader *sr) {
-  unsigned int size;
-  tinyvdb_int64 i64 = 0;
+static inline int64_t ReadMetaInt64(StreamReader *sr) {
+  uint32_t size;
+  int64_t i64 = 0;
   sr->read4(&size);
-  if (size == sizeof(tinyvdb_int64)) {
-    sr->read8(reinterpret_cast<tinyvdb_uint64 *>(&i64));
+  if (size == sizeof(int64_t)) {
+    sr->read8(reinterpret_cast<uint64_t *>(&i64));
   }
   return i64;
 }
@@ -1978,7 +2228,7 @@ static bool DecompressBlosc(unsigned char *dst, unsigned long uncompressed_size,
 
 static bool ReadAndDecompressData(StreamReader *sr, unsigned char *dst_data,
                                   size_t element_size, size_t count,
-                                  unsigned int compression_mask,
+                                  uint32_t compression_mask,
                                   std::string *warn, std::string *err) {
 
   (void)warn;
@@ -1989,7 +2239,7 @@ static bool ReadAndDecompressData(StreamReader *sr, unsigned char *dst_data,
 #if defined(TINYVDBIO_USE_BLOSC)
     // Read the size of the compressed data.
     // A negative size indicates uncompressed data.
-    tinyvdb_int64 numCompressedBytes;
+    int64 numCompressedBytes;
     sr->read8(&numCompressedBytes);
 
     std::cout << "numCompressedBytes " << numCompressedBytes << std::endl;
@@ -2035,7 +2285,7 @@ static bool ReadAndDecompressData(StreamReader *sr, unsigned char *dst_data,
   } else if (compression_mask & COMPRESS_ZIP) {
     // Read the size of the compressed data.
     // A negative size indicates uncompressed data.
-    tinyvdb_int64 numZippedBytes;
+    int64_t numZippedBytes;
     sr->read8(&numZippedBytes);
     std::cout << "numZippedBytes = " << numZippedBytes << std::endl;
 
@@ -2085,12 +2335,12 @@ static bool ReadAndDecompressData(StreamReader *sr, unsigned char *dst_data,
         swap2(ptr + i);
       }
     } else if (element_size == 4) {
-      unsigned int *ptr = reinterpret_cast<unsigned int *>(dst_data);
+      uint32_t *ptr = reinterpret_cast<uint32_t *>(dst_data);
       for (size_t i = 0; i < count; i++) {
         swap4(ptr + i);
       }
     } else if (element_size == 8) {
-      tinyvdb_uint64 *ptr = reinterpret_cast<tinyvdb_uint64 *>(dst_data);
+      uint64_t *ptr = reinterpret_cast<uint64_t *>(dst_data);
       for (size_t i = 0; i < count; i++) {
         swap8(ptr + i);
       }
@@ -2100,7 +2350,7 @@ static bool ReadAndDecompressData(StreamReader *sr, unsigned char *dst_data,
   return true;
 }
 
-static bool ReadValues(StreamReader *sr, const unsigned int compression_flags,
+static bool ReadValues(StreamReader *sr, const uint32_t compression_flags,
                        size_t num_values, ValueType value_type,
                        std::vector<unsigned char> *values, std::string *warn, std::string *err) {
   // usually fp16 or fp32
@@ -2124,8 +2374,8 @@ static bool ReadValues(StreamReader *sr, const unsigned int compression_flags,
 }
 
 static bool ReadMaskValues(StreamReader *sr,
-                           const unsigned int compression_flags,
-                           const unsigned int file_version,
+                           const uint32_t compression_flags,
+                           const uint32_t file_version,
                            const Value background, size_t num_values,
                            ValueType value_type, NodeMask value_mask,
                            std::vector<unsigned char> *values,
@@ -2178,7 +2428,7 @@ static bool ReadMaskValues(StreamReader *sr,
     // For use in mask compression (only), read the bitmask that selects
     // between two distinct inactive values.
     if (seek) {
-      sr->seek_set(sr->tell() + selection_mask.memUsage());
+      sr->seek_set(sr->tell() + uint32_t(selection_mask.memUsage()));
     } else {
       selection_mask.load(sr);
     }
@@ -2188,7 +2438,7 @@ static bool ReadMaskValues(StreamReader *sr,
 
   if (mask_compressed && per_node_flag != NO_MASK_AND_ALL_VALS &&
       file_version >= TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
-    read_count = size_t(value_mask.countOn());
+    read_count = size_t(value_mask.count_on());
     std::cout << "3 metadata. read count = " << read_count << std::endl;
   }
 
@@ -2211,16 +2461,16 @@ static bool ReadMaskValues(StreamReader *sr,
     // assumed to be initialized to background value zero, so inactive values
     // can be ignored.)
     size_t sz = GetValueTypeSize(value_type);
-    for (size_t destIdx = 0, tempIdx = 0; destIdx < selection_mask.SIZE;
+    for (size_t destIdx = 0, tempIdx = 0; destIdx < size_t(selection_mask.BITSIZE);
          ++destIdx) {
-      if (value_mask.isOn(int32(destIdx))) {
+      if (value_mask.is_on(int32_t(destIdx))) {
         // Copy a saved active value into this node's buffer.
         memcpy(&values->at(destIdx * sz), &tmp_buf.at(tempIdx * sz), sz);
         ++tempIdx;
       } else {
         // Reconstruct an unsaved inactive value and copy it into this node's
         // buffer.
-        if (selection_mask.isOn(int32(destIdx))) {
+        if (selection_mask.is_on(int32_t(destIdx))) {
           memcpy(&values->at(destIdx * sz), &inactiveVal1, sz);
         } else {
           memcpy(&values->at(destIdx * sz), &inactiveVal0, sz);
@@ -2236,11 +2486,10 @@ static bool ReadMaskValues(StreamReader *sr,
 }
 
 bool NodeMask::load(StreamReader *sr) {
-  //std::cout << "DBG: mWords memUsage = " << this->memUsage() << std::endl;
+  //std::cout << "DBG: mWords size = " << this->size() << std::endl;
   //std::cout << "DBG: mWords.size = " << mWords.size() << std::endl;
 
-  bool ret = sr->read(this->memUsage(), this->memUsage(),
-                      reinterpret_cast<unsigned char *>(mWords.data()));
+  bool ret = sr->read(this->memUsage(), this->memUsage(), bits.data());
 
   return ret;
 }
@@ -2267,7 +2516,7 @@ bool RootNode::ReadTopology(StreamReader *sr, int level, const DeserializeParams
   std::cout << "num_children " << num_children_ << std::endl;
 
   // Read tiles.
-  for (unsigned int n = 0; n < num_tiles_; n++) {
+  for (uint32_t n = 0; n < num_tiles_; n++) {
     int vec[3];
     Value value;
     bool active;
@@ -2284,7 +2533,7 @@ bool RootNode::ReadTopology(StreamReader *sr, int level, const DeserializeParams
   }
 
   // Read child nodes.
-  for (unsigned int n = 0; n < num_children_; n++) {
+  for (uint32_t n = 0; n < num_children_; n++) {
     Vec3i coord;
     sr->read4(&coord.x);
     sr->read4(&coord.y);
@@ -2303,7 +2552,7 @@ bool RootNode::ReadTopology(StreamReader *sr, int level, const DeserializeParams
 
     std::cout << "root.child[" << n << "] vec = (" << coord.x << ", " << coord.y << ", " << coord.z << std::endl;
 
-    unsigned int global_voxel_size = grid_layout_info_.ComputeGlobalVoxelSize(0);
+    uint32_t global_voxel_size = grid_layout_info_.ComputeGlobalVoxelSize(0);
     Boundsi bounds;
     bounds.bmin = coord;
     bounds.bmax.x = coord.x + int(global_voxel_size);
@@ -2388,12 +2637,12 @@ bool InternalOrLeafNode::ReadTopology(StreamReader *sr,
         1 << (3 * grid_layout_info_.GetNodeInfo(level)
                       .log2dim());  // total voxel count represented by this node
 
-    std::cout << "num value_mask = " << value_mask_.SIZE << std::endl;
+    std::cout << "num value_mask = " << value_mask_.BITSIZE << std::endl;
     std::cout << "NUM_VALUES = " << NUM_VALUES << std::endl;
 
     // Older version will have less values
     const int num_values =
-        (old_version ? int(child_mask_.countOff()) : NUM_VALUES);
+        (old_version ? int(child_mask_.nbits() - child_mask_.count_on()) : NUM_VALUES);
 
     {
       std::vector<unsigned char> values;
@@ -2418,8 +2667,8 @@ bool InternalOrLeafNode::ReadTopology(StreamReader *sr,
 
         // loop over child flags is off.
         int n = 0;
-        for (int32 i = 0; i < int32(NUM_VALUES); i++) {
-          if (child_mask_.isOff(i)) {
+        for (int32_t i = 0; i < int32_t(NUM_VALUES); i++) {
+          if (child_mask_.is_off(i)) {
             // mNodes[iter.pos()].setValue(values[n++]);
             n++;
           }
@@ -2427,26 +2676,26 @@ bool InternalOrLeafNode::ReadTopology(StreamReader *sr,
         TINYVDBIO_ASSERT(n == num_values);
       } else {
         // loop over child flags is off.
-        for (int32 i = 0; i < int32(NUM_VALUES); i++) {
-          if (child_mask_.isOff(i)) {
+        for (int32_t i = 0; i < int32_t(NUM_VALUES); i++) {
+          if (child_mask_.is_off(i)) {
             // mNodes[iter.pos()].setValue(values[iter.pos());
           }
         }
       }
     }
 
-    std::cout << "SIZE = " << child_mask_.SIZE << std::endl;
-    child_nodes_.resize(child_mask_.SIZE, grid_layout_info_);
+    std::cout << "SIZE = " << child_mask_.BITSIZE << std::endl;
+    child_nodes_.resize(size_t(child_mask_.BITSIZE), grid_layout_info_);
 
 
     // loop over child node
-    for (int32 i = 0; i < child_mask_.SIZE; i++) {
-      if (child_mask_.isOn(i)) {
+    for (int32_t i = 0; i < child_mask_.BITSIZE; i++) {
+      if (child_mask_.is_on(i)) {
         //if (node_desc_.child_node_desc_) {
         if (1) { // HACK
-          TINYVDBIO_ASSERT(i < child_nodes_.size());
+          TINYVDBIO_ASSERT(i < int32_t(child_nodes_.size()));
           //child_nodes_[i] = new InternalOrLeafNode
-          if (!child_nodes_[i].ReadTopology(sr, level + 1, params, warn, err)) {
+          if (!child_nodes_[size_t(i)].ReadTopology(sr, level + 1, params, warn, err)) {
             return false;
           }
         } else { // leaf
@@ -2486,11 +2735,11 @@ bool InternalOrLeafNode::ReadBuffer(StreamReader *sr, int level, const Deseriali
 
   if (node_type == NODE_TYPE_INTERNAL) {
     size_t count = 0;
-    for (int32 i = 0; i < child_mask_.SIZE; i++) {
-      if (child_mask_.isOn(i)) {
+    for (int32_t i = 0; i < child_mask_.BITSIZE; i++) {
+      if (child_mask_.is_on(i)) {
         std::cout << "InternalOrLeafNode.ReadBuffer[" << count << "]" << std::endl;
         // TODO: FIXME
-        if (!child_nodes_[i].ReadBuffer(sr, level + 1, params, warn, err)) {
+        if (!child_nodes_[size_t(i)].ReadBuffer(sr, level + 1, params, warn, err)) {
           return false;
         }
         count++;
@@ -2504,10 +2753,10 @@ bool InternalOrLeafNode::ReadBuffer(StreamReader *sr, int level, const Deseriali
     char num_buffers = 1;
 
     std::cout << "LeafNode.ReadBuffer pos = " << sr->tell() << std::endl;
-    std::cout << " value_mask_.memUsage = " << value_mask_.memUsage() << std::endl;
+    std::cout << " value_mask_.size = " << value_mask_.memUsage() << std::endl;
 
     // Seek over the value mask.
-    sr->seek_from_currect(value_mask_.memUsage());
+    sr->seek_from_currect(int64_t(value_mask_.memUsage()));
 
     std::cout << "is pos = " << sr->tell() << std::endl;
 
@@ -2548,7 +2797,7 @@ bool InternalOrLeafNode::ReadBuffer(StreamReader *sr, int level, const Deseriali
 
     if (mask_compressed && per_node_flag != NO_MASK_AND_ALL_VALS &&
         (params.file_version >= TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION)) {
-      read_count = size_t(value_mask_.countOn());
+      read_count = size_t(value_mask_.count_on());
     }
 
     std::cout << "read_count = " << read_count << std::endl;
@@ -2591,7 +2840,7 @@ std::string GridDescriptor::StripSuffix(const std::string &name) {
   return name.substr(0, name.find(SEP));
 }
 
-bool GridDescriptor::Read(StreamReader *sr, const unsigned int file_version,
+bool GridDescriptor::Read(StreamReader *sr, const uint32_t file_version,
                           std::string *err) {
   (void)file_version;
 
@@ -2697,7 +2946,7 @@ static bool ReadMeta(StreamReader *sr) {
       std::cout << "  value = " << f << std::endl;
 
     } else if (type_name.compare("int64") == 0) {
-      tinyvdb_int64 i64 = ReadMetaInt64(sr);
+      int64_t i64 = ReadMetaInt64(sr);
 
       std::cout << "  value = " << i64 << std::endl;
 
@@ -2710,7 +2959,7 @@ static bool ReadMeta(StreamReader *sr) {
 
       std::vector<char> data;
       data.resize(size_t(num_bytes));
-      sr->read(size_t(num_bytes), tinyvdb_uint64(num_bytes),
+      sr->read(size_t(num_bytes), uint64_t(num_bytes),
                reinterpret_cast<unsigned char *>(data.data()));
     }
   }
@@ -2719,7 +2968,7 @@ static bool ReadMeta(StreamReader *sr) {
 }
 
 static bool ReadGridDescriptors(StreamReader *sr,
-                                const unsigned int file_version,
+                                const uint32_t file_version,
                                 std::map<std::string, GridDescriptor> *gd_map) {
   // Read the number of grid descriptors.
   int count = 0;
@@ -2797,20 +3046,20 @@ static bool ReadTransform(StreamReader *sr, std::string *err) {
   return true;
 }
 
-static unsigned int ReadGridCompression(StreamReader *sr,
-                                        unsigned int file_version) {
-  unsigned int compression = COMPRESS_NONE;
+static uint32_t ReadGridCompression(StreamReader *sr,
+                                        uint32_t file_version) {
+  uint32_t compression = COMPRESS_NONE;
   if (file_version >= TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
     sr->read4(&compression);
   }
   return compression;
 }
 
-static bool ReadGrid(StreamReader *sr, const unsigned int file_version,
+static bool ReadGrid(StreamReader *sr, const uint32_t file_version,
                      const bool half_precision, const GridDescriptor &gd,
                      std::string *warn, std::string *err) {
   // read compression per grid(optional)
-  unsigned int grid_compression = ReadGridCompression(sr, file_version);
+  uint32_t grid_compression = ReadGridCompression(sr, file_version);
 
   DeserializeParams params;
   params.file_version = file_version;
@@ -2872,7 +3121,7 @@ static bool ReadGrid(StreamReader *sr, const unsigned int file_version,
   }
 
   // Move to grid position
-  sr->seek_set(tinyvdb_uint64(gd.GridByteOffset()));
+  sr->seek_set(uint64_t(gd.GridByteOffset()));
 
   return true;
 }
@@ -2900,7 +3149,7 @@ VDBStatus ParseVDBHeader(const std::string &filename, VDBHeader *header,
     // TODO(syoyo): Use mmap
     ifs.seekg(0, ifs.end);
     size_t sz = static_cast<size_t>(ifs.tellg());
-    if (tinyvdb_int64(sz) < 0) {
+    if (int64_t(sz) < 0) {
       // Looks reading directory, not a file.
       if (err) {
         (*err) += "Looks like filename is a directory : \"" + filename + "\"\n";
@@ -2931,7 +3180,7 @@ VDBStatus ParseVDBHeader(const std::string &filename, VDBHeader *header,
 
 static bool IsBigEndian(void) {
   union {
-    unsigned int i;
+    uint32_t i;
     char c[4];
   } bint = {0x01020304};
 
@@ -2940,7 +3189,7 @@ static bool IsBigEndian(void) {
 
 VDBStatus ParseVDBHeader(const unsigned char *data, const size_t len,
                          VDBHeader *header, std::string *err) {
-  tinyvdb_int64 magic;
+  int64_t magic;
 
   // OpenVDB stores data in little endian manner(e.g. x86).
   // Swap bytes for big endian architecture(e.g. Power, SPARC)
@@ -2966,7 +3215,7 @@ VDBStatus ParseVDBHeader(const unsigned char *data, const size_t len,
   }
 
   // [8:11] version
-  unsigned int file_version = 0;
+  uint32_t file_version = 0;
   if (!sr.read4(&file_version)) {
     if (err) {
       (*err) += "Failed to read file version.\n";
@@ -2987,8 +3236,8 @@ VDBStatus ParseVDBHeader(const unsigned char *data, const size_t len,
 
   // Read the library version numbers (not stored prior to file format version
   // 211).
-  unsigned int major_version = 0;
-  unsigned int minor_version = 0;
+  uint32_t major_version = 0;
+  uint32_t minor_version = 0;
   if (file_version >= 211) {
     sr.read4(&major_version);
     std::cout << "major version : " << major_version << std::endl;
@@ -3069,7 +3318,7 @@ VDBStatus ReadGridDescriptors(const std::string &filename,
     // TODO(syoyo): Use mmap
     ifs.seekg(0, ifs.end);
     size_t sz = static_cast<size_t>(ifs.tellg());
-    if (tinyvdb_int64(sz) < 0) {
+    if (int64_t(sz) < 0) {
       // Looks reading directory, not a file.
       if (err) {
         (*err) += "Looks like filename is a directory : \"" + filename + "\"\n";
@@ -3145,7 +3394,7 @@ VDBStatus ReadGrids(const std::string &filename, const VDBHeader &header,
     // TODO(syoyo): Use mmap
     ifs.seekg(0, ifs.end);
     size_t sz = static_cast<size_t>(ifs.tellg());
-    if (tinyvdb_int64(sz) < 0) {
+    if (int64_t(sz) < 0) {
       // Looks reading directory, not a file.
       if (err) {
         (*err) += "Looks like filename is a directory : \"" + filename + "\"\n";
@@ -3202,12 +3451,12 @@ VDBStatus ReadGrids(const unsigned char *data, const size_t data_len,
 
 static bool WriteVDBHeader(std::ostream &os) {
   // [0:7] magic number
-  tinyvdb_int64 magic = kOPENVDB_MAGIC;
+  int64_t magic = kOPENVDB_MAGIC;
   os.write(reinterpret_cast<char *>(&magic), 8);
 
   // [8:11] version
-  unsigned int file_version = kTINYVDB_FILE_VERSION;
-  os.write(reinterpret_cast<char *>(&file_version), sizeof(unsigned int));
+  uint32_t file_version = kTINYVDB_FILE_VERSION;
+  os.write(reinterpret_cast<char *>(&file_version), sizeof(uint32_t));
 
 #if 0  // TODO(syoyo): Implement
 
@@ -3216,10 +3465,10 @@ static bool WriteVDBHeader(std::ostream &os) {
   // Read the library version numbers (not stored prior to file format version
   // 211).
   if (file_version >= 211) {
-    unsigned int version;
-    ifs.read(reinterpret_cast<char *>(&version), sizeof(unsigned int));
+    uint32_t version;
+    ifs.read(reinterpret_cast<char *>(&version), sizeof(uint32_t));
     std::cout << "major version : " << version << std::endl;
-    ifs.read(reinterpret_cast<char *>(&version), sizeof(unsigned int));
+    ifs.read(reinterpret_cast<char *>(&version), sizeof(uint32_t));
     std::cout << "minor version : " << version << std::endl;
   }
 
