@@ -121,7 +121,7 @@ class Boundsi {
     bound.bmax.x = std::max(a.bmax.x, b.bmax.x);
     bound.bmax.y = std::max(a.bmax.y, b.bmax.y);
     bound.bmax.z = std::max(a.bmax.z, b.bmax.z);
-    
+
     return bound;
   }
 
@@ -947,7 +947,7 @@ class GridLayoutInfo {
       unsigned int sz = 1 << node_infos_[size_t(l)].log2dim();
 
       voxel_size *= sz;
-    }   
+    }
 
     return voxel_size;
   }
@@ -1059,7 +1059,7 @@ class InternalOrLeafNode : public Node {
   }
 
   //~InternalOrLeafNode();
-  
+
 
   /// Deep copy function
   InternalOrLeafNode &Copy(const InternalOrLeafNode &rhs);
@@ -1133,7 +1133,7 @@ class RootNode : public Node {
   std::vector<InternalOrLeafNode> &GetChildNodes() {
     return child_nodes_;
   }
-  
+
   const std::vector<Boundsi> &GetChildBounds() const {
     return child_bounds_;
   }
@@ -1160,7 +1160,7 @@ struct VoxelNode
   unsigned int bmin[3];
   unsigned int bmax[3];
 
-  bool is_leaf;  
+  bool is_leaf;
 
   unsigned int num_divs[3]; // The number of voxel divisions
 
@@ -1185,7 +1185,7 @@ struct VoxelNode
 class VoxelTree
 {
  public:
-  
+
   ///
   /// Returns tree is valid(got success to build tree?)
   ///
@@ -1199,10 +1199,10 @@ class VoxelTree
 
   ///
   /// Sample voxel value for a given coordinate.
-  /// Returns voxel value or background value when `loc` coordinate is empty. 
+  /// Returns voxel value or background value when `loc` coordinate is empty.
   ///
   /// @param[in] loc Sample coordinate.
-  /// @param[in] req_channels Required channels of voxel data. 
+  /// @param[in] req_channels Required channels of voxel data.
   /// @param[out] out Sampled voxel value(length = req_channels)
   ///
   void Sample(const unsigned int loc[3], const unsigned char req_channels, float *out);
@@ -1217,7 +1217,7 @@ class VoxelTree
   double bmin_[3]; // bounding min of root voxel node(in world coordinate).
   double bmax_[3]; // bounding max of root voxel node(in world coordinate).
   double pitch_[3];  // voxel pitch at leaf level. Assume all voxel has same pitch size.
-  
+
 
   std::vector<VoxelNode> nodes_; // [0] = root node
 };
@@ -1343,7 +1343,7 @@ const int kOPENVDB_MAGIC = 0x56444220;
 ///
 const unsigned int kTINYVDB_FILE_VERSION = 220;
 
-// File format versions.
+// File format versions(identical to OPENVDB_FILE_VERSION_***).
 // This should be same with OpenVDB's implementation.
 // We don't support version less than 220
 enum {
@@ -2437,7 +2437,7 @@ bool InternalOrLeafNode::ReadTopology(StreamReader *sr,
 
     std::cout << "SIZE = " << child_mask_.SIZE << std::endl;
     child_nodes_.resize(child_mask_.SIZE, grid_layout_info_);
-    
+
 
     // loop over child node
     for (int32 i = 0; i < child_mask_.SIZE; i++) {
@@ -2452,7 +2452,7 @@ bool InternalOrLeafNode::ReadTopology(StreamReader *sr,
         } else { // leaf
           // TODO: add to child.
           TINYVDBIO_ASSERT(0);
-        } 
+        }
       }
     }
 
@@ -2873,7 +2873,7 @@ static bool ReadGrid(StreamReader *sr, const unsigned int file_version,
 
   // Move to grid position
   sr->seek_set(tinyvdb_uint64(gd.GridByteOffset()));
-    
+
   return true;
 }
 
@@ -3295,7 +3295,7 @@ bool SaveVDB(const std::string &filename, std::string *err) {
 void VoxelTree::BuildTree(const InternalOrLeafNode& root, int depth)
 {
   (void)root;
-  (void)depth; 
+  (void)depth;
 }
 
 bool VoxelTree::Build(const RootNode &root, std::string *err)

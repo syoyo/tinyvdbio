@@ -40,10 +40,10 @@ Currently, only `FloatTree`(`tree::Tree4<float,       5, 4, 3>::Type`) topology 
 
 Simply copy `tinyvdbio.h` and `miniz.c` and `miniz.h` to your project.
 
-## Optional feature
+## Compile flags
 
-TinyVDBIO use `miniz` as a default zip compression library.
-You can define `TINYVDBIO_USE_SYSTEM_ZLIB` for system provided zlib library.
+* TINYVDBIO_USE_BLOSC : Enable Blosc compression.
+* TINYVDBIO_USE_SYSTEM_ZLIB : TinyVDBIO use `miniz` as a default zip compression library. You can define this `TINYVDBIO_USE_SYSTEM_ZLIB` to use system provided zlib library. Plese add an include path to `zlib.h` if required.
 
 ## Example
 
@@ -55,6 +55,9 @@ You can define `TINYVDBIO_USE_SYSTEM_ZLIB` for system provided zlib library.
 // define this only in *one* .cc file.
 #define TINYVDBIO_IMPLEMENTATION
 #include "tinyvdbio.h"
+
+
+T.B.W.
 ```
 
 ### Blosc(T.B.W.)
