@@ -9,6 +9,7 @@ TinyVDBIO is good for not only your graphics application, but also HPC visualiza
 ## Features
 
 * [x] Can be compiled with rather old C++03 compiler.
+  * [x] C++11 or later is recommended though.
 * [x] Big endian support(e.g. Power, SPARC)
 * [x] Cross-platform(should be at least compilable on Linux, macOS and Windows)
 * [x] Limited support of loading OpenVDB data(version from 220 to 223 are supported)
