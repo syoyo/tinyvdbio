@@ -13,7 +13,7 @@ TinyVDBIO is good for not only your graphics application, but also HPC visualiza
 * [x] Cross-platform(should be at least compilable on Linux, macOS and Windows)
 * [x] Limited support of loading OpenVDB data(version from 220 to 223 are supported)
   * [x] ZIP compression
-  * [ ] BLOSC compression
+  * [x] BLOSC compression
 * [ ] Simple saving of OpenVDB data.
 
 ### TinyVDB only feature
@@ -30,14 +30,17 @@ Currently, only `FloatTree`(`tree::Tree4<float,       5, 4, 3>::Type`) topology 
 
 ## TODO
 
+* [ ] Multi-threaded decoding using C++11 thread.
 * [ ] Support points.
 * [ ] Support various topology type.
 * [ ] Support Multipass IO version(224)
 * [ ] mmap based accesss for larger data set.
+* [ ] Switch to MIT license by removing OpenVDB code(MPL 2.0 licensed code)
 
 ## How to use
 
 Simply copy `tinyvdbio.h` and `miniz.c` and `miniz.h` to your project.
+Recent OpenVDB file(223~) are usually compressed using BLOSC, so it is highly recommended to enable BLOSC suppor(see the below for compiliation).
 
 ## Compile flags
 
@@ -59,10 +62,17 @@ Simply copy `tinyvdbio.h` and `miniz.c` and `miniz.h` to your project.
 T.B.W.
 ```
 
-### Blosc(T.B.W.)
+### Blosc
+
+#### Setup
 
 ```
-$ git submodule update --init
+$ git submodule update --init --recursive
+```
+
+#### Build
+
+```
 $ cd third_party/c-blosc/
 $ rm -rf build
 $ mkdir build
@@ -89,8 +99,15 @@ There are two bit masks, `child mask` and `value mask`, for each `Node`.
 
 TinyVDBIO is released under the [Mozilla Public License Version 2.0](https://www.mozilla.org/MPL/2.0/), which is a free, open source, and detailed software license developed and maintained by the Mozilla Foundation. It is a hybrid of the modified [BSD license](https://en.wikipedia.org/wiki/BSD_licenses#3-clause) and the [GNU General Public License](https://en.wikipedia.org/wiki/GNU_General_Public_License) (GPL) that seeks to balance the concerns of proprietary and open source developers.
 
+### Third party licenses
+
+* imgui : MIT license
+* stb series : Public domain
+* glfw3 : zlib license
+* glad : ???
+
 ### Notes on patent
 
-TinyVDB uses some code from OpenVDB related to IO, Archive and Tree. According to MPL2.0, Modifing source code may loose patent grant from original contributor(in this case, DreamWorks).
+TinyVDB uses some code from OpenVDB related to IO, Archive and Tree. According to MPL2.0, Modifing source code may loose patent grant from original contributors(in this case, DreamWorks).
 
 At this point, it looks there is no claimed patent(including application or pending phase) for hierarchical grid representation by DreamWorks.

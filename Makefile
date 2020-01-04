@@ -1,14 +1,19 @@
-BLOSC_INC=-I./third_party/c-blosc/
+# BLOSC master
+BLOSC_INC=-I./third_party/c-blosc/blosc
 BLOSC_LIB=./third_party/c-blosc/build/blosc/libblosc.a
 
+# BLOSC v1.5
+# BLOSC_INC=-I./third_party/c-blosc/blosc
+# BLOSC_LIB=./third_party/c-blosc/build/blosc/libblosc.a -lz -llz4 -lsnappy
 
-# # NODEP version
-# all:
-# 	clang -Wno-#pragma-messages -c miniz.c
-# 	clang++ -o loader_test -fsanitize=address -g -Weverything -Werror -Wno-c++98-compat loader_test.cc miniz.o
+
+## NODEP version
+#all:
+#	clang -Wno-#pragma-messages -c -g -O2 miniz.c
+#	clang++ -o loader_test -fsanitize=address -O2 -g -Weverything -Werror -Wno-c++98-compat loader_test.cc miniz.o
 
 # BLOSC(static lib) version
 
 all:
-	clang -Wno-#pragma-messages -c miniz.c
-	clang++ -o loader_test -DTINYVDBIO_USE_BLOSC $(BLOSC_INC) -fsanitize=address -g -Weverything -Werror -Wno-c++98-compat loader_test.cc miniz.o $(BLOSC_LIB)
+	clang -Wno-#pragma-messages -c -g -O1 miniz.c
+	clang++ -o loader_test -DTINYVDBIO_USE_BLOSC $(BLOSC_INC) -O3 -g -Weverything -Werror -Wno-c++98-compat loader_test.cc miniz.o $(BLOSC_LIB) -pthread

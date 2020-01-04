@@ -1,6 +1,6 @@
 //////////////////////////////////////////////////////////////////////////
 //
-// Copyright (c) 2018 Syoyo Fujita
+// Copyright (c) 2018-2020 Syoyo Fujita
 // Copyright (c) 2012-2018 DreamWorks Animation LLC
 //
 // All rights reserved. This software is distributed under the
@@ -377,14 +377,14 @@ struct DeserializeParams;
 #if 0             // TODO(syoyo): Remove
 
 /// Return the number of on bits in the given 8-bit value.
-inline int32_t CountOn(unsigned char v) {
+inline int32_t CountOn(uint8_t v) {
 // Simple LUT:
 #ifndef _MSC_VER  // Visual C++ doesn't guarantee thread-safe initialization of
                   // local statics
   static
 #endif
       /// @todo Move this table and others into, say, Util.cc
-      const unsigned char numBits[256] = {
+      const uint8_t numBits[256] = {
 #define COUNTONB2(n) n, n + 1, n + 1, n + 2
 #define COUNTONB4(n) \
   COUNTONB2(n), COUNTONB2(n + 1), COUNTONB2(n + 1), COUNTONB2(n + 2)
@@ -406,8 +406,8 @@ inline int32_t CountOn(unsigned char v) {
 }
 
 /// Return the number of off bits in the given 8-bit value.
-inline int32_t CountOff(unsigned char v) {
-  return CountOn(static_cast<unsigned char>(~v));
+inline int32_t CountOff(uint8_t v) {
+  return CountOn(static_cast<uint8_t>(~v));
 }
 
 /// Return the number of on bits in the given 32-bit value.
@@ -432,14 +432,14 @@ inline int32_t CountOn(int64 v) {
 inline int32_t CountOff(int64 v) { return CountOn(~v); }
 
 /// Return the least significant on bit of the given 8-bit value.
-inline int32_t FindLowestOn(unsigned char v) {
+inline int32_t FindLowestOn(uint8_t v) {
   TINYVDBIO_ASSERT(v);
 #ifndef _MSC_VER  // Visual C++ doesn't guarantee thread-safe initialization of
                   // local statics
   static
 #endif
-      const unsigned char DeBruijn[8] = {0, 1, 6, 2, 7, 5, 4, 3};
-  return DeBruijn[static_cast<unsigned char>((v & -v) * 0x1DU) >> 5];
+      const uint8_t DeBruijn[8] = {0, 1, 6, 2, 7, 5, 4, 3};
+  return DeBruijn[static_cast<uint8_t>((v & -v) * 0x1DU) >> 5];
 }
 
 /// Return the least significant on bit of the given 32-bit value.
@@ -450,7 +450,7 @@ inline int32_t FindLowestOn(int32_t v) {
                   // local statics
   static
 #endif
-      const unsigned char DeBruijn[32] = {
+      const uint8_t DeBruijn[32] = {
           0,  1,  28, 2,  29, 14, 24, 3, 30, 22, 20, 15, 25, 17, 4,  8,
           31, 27, 13, 23, 21, 19, 16, 7, 26, 12, 18, 6,  11, 5,  10, 9};
   return DeBruijn[int32((v & -v) * 0x077CB531U) >> 27];
@@ -464,7 +464,7 @@ inline int32_t FindLowestOn(int64 v) {
                   // local statics
   static
 #endif
-      const unsigned char DeBruijn[64] = {
+      const uint8_t DeBruijn[64] = {
           0,  1,  2,  53, 3,  7,  54, 27, 4,  38, 41, 8,  34, 55, 48, 28,
           62, 5,  39, 46, 44, 42, 22, 9,  24, 35, 59, 56, 49, 18, 29, 11,
           63, 52, 6,  26, 37, 40, 33, 47, 61, 45, 43, 21, 23, 58, 17, 10,
@@ -479,7 +479,7 @@ inline int32_t FindHighestOn(int32_t v) {
                   // local statics
   static
 #endif
-      const unsigned char DeBruijn[32] = {
+      const uint8_t DeBruijn[32] = {
           0, 9,  1,  10, 13, 21, 2,  29, 11, 14, 16, 18, 22, 25, 3, 30,
           8, 12, 20, 28, 15, 17, 24, 7,  19, 27, 23, 6,  26, 5,  4, 31};
   v |= v >> 1;  // first round down to one less than a power of 2
@@ -940,8 +940,9 @@ class GridDescriptor {
 
   uint64_t EndByteOffset() const { return end_byte_offset_; }
 
-  static std::string AddSuffix(const std::string &name, int n);
-  static std::string StripSuffix(const std::string &name);
+  // "\x1e" = ASCII "record separator"
+  static std::string AddSuffix(const std::string &name, int n, const std::string &seperator = "\x1e");
+  static std::string StripSuffix(const std::string &name, const std::string &separator = "\x1e");
 
   ///
   /// Read GridDescriptor from a stream.
@@ -1310,7 +1311,7 @@ class InternalOrLeafNode : public Node {
 
   // For leaf node
 
-  std::vector<unsigned char> data_;  // Leaf's voxel data.
+  std::vector<uint8_t> data_;  // Leaf's voxel data.
   uint32_t num_voxels_;
 };
 
@@ -1403,7 +1404,7 @@ class VoxelTree {
   /// @param[in] req_channels Required channels of voxel data.
   /// @param[out] out Sampled voxel value(length = req_channels)
   ///
-  void Sample(const uint32_t loc[3], const unsigned char req_channels,
+  void Sample(const uint32_t loc[3], const uint8_t req_channels,
               float *out);
 
  private:
@@ -1439,7 +1440,7 @@ VDBStatus ParseVDBHeader(const std::string &filename, VDBHeader *header,
 /// Returns false when failed to parse VDB header and store error message to
 /// `err`.
 ///
-VDBStatus ParseVDBHeader(const unsigned char *data, const size_t len,
+VDBStatus ParseVDBHeader(const uint8_t *data, const size_t len,
                          VDBHeader *header, std::string *err);
 
 ///
@@ -1461,13 +1462,14 @@ VDBStatus ReadGridDescriptors(const std::string &filename,
 /// Returns false when failed to read VDB data and store error message to
 /// `err`.
 ///
-VDBStatus ReadGridDescriptors(const unsigned char *data, const size_t data_len,
+VDBStatus ReadGridDescriptors(const uint8_t *data, const size_t data_len,
                               const VDBHeader &header,
                               std::map<std::string, GridDescriptor> *gd_map,
                               std::string *err);
 
 ///
 /// Load Grid data from file
+/// TODO(syoyo): Deprecate
 ///
 /// Returns TINYVDBIO_SUCCESS upon success.
 /// Returns false when failed to read VDB data and store error message to
@@ -1485,7 +1487,7 @@ VDBStatus ReadGrids(const std::string &filename, const VDBHeader &header,
 /// `err`.
 /// Returns warning message tot `warn`.
 ///
-VDBStatus ReadGrids(const unsigned char *data, const size_t data_len,
+VDBStatus ReadGrids(const uint8_t *data, const size_t data_len,
                     const VDBHeader &header,
                     const std::map<std::string, GridDescriptor> &gd_map,
                     std::string *warn, std::string *err);
@@ -1505,10 +1507,12 @@ bool SaveVDB(const std::string &filename, std::string *err);
 extern "C" {
 #include "miniz.h"
 }
+#else
+// Include your zlib.h before including this tinyvdbio.h
 #endif
 
 #if defined(TINYVDBIO_USE_BLOSC)
-#include "blosc.h"
+#include <blosc.h>
 #endif
 
 #include <iostream>  // HACK
@@ -1533,10 +1537,6 @@ std::ostream &operator<<(std::ostream &os, const Boundsi &bound) {
 
 const int kOPENVDB_MAGIC = 0x56444220;
 
-#ifndef MINIZ_LITTLE_ENDIAN
-#define MINIZ_LITTLE_ENDIAN (1)
-#endif
-
 ///
 /// TinyVDBIO's default file version.
 ///
@@ -1555,39 +1555,30 @@ enum {
 };
 
 enum {
-  COMPRESS_NONE = 0,
-  COMPRESS_ZIP = 0x1,
-  COMPRESS_ACTIVE_MASK = 0x2,
-  COMPRESS_BLOSC = 0x4
+  TINYVDB_COMPRESS_NONE = 0,
+  TINYVDB_COMPRESS_ZIP = 0x1,
+  TINYVDB_COMPRESS_ACTIVE_MASK = 0x2,
+  TINYVDB_COMPRESS_BLOSC = 0x4
 };
 
-namespace {
-
-// In order not to break backward compatibility with existing VDB files,
-// grids stored using 16-bit half floats are flagged by adding the following
-// suffix to the grid's type name on output.  The suffix is removed on input
-// and the grid's "save float as half" flag set accordingly.
-const char *HALF_FLOAT_TYPENAME_SUFFIX = "_HalfFloat";
-
-const char *SEP = "\x1e";  // ASCII "record separator"
-
-}  // namespace
-
 // https://gist.github.com/rygorous/2156668
-// Reuse MINIZ_LITTLE_ENDIAN flag from miniz.
-union FP32 {
+union FP32LE {
   uint32_t u;
   float f;
   struct {
-#if MINIZ_LITTLE_ENDIAN
     uint32_t Mantissa : 23;
     uint32_t Exponent : 8;
     uint32_t Sign : 1;
-#else
+  } s;
+};
+
+union FP32BE {
+  uint32_t u;
+  float f;
+  struct {
     uint32_t Sign : 1;
     uint32_t Exponent : 8;
     uint32_t Mantissa : 23;
-#endif
   } s;
 };
 
@@ -1596,18 +1587,21 @@ union FP32 {
 #pragma clang diagnostic ignored "-Wpadded"
 #endif
 
-union FP16 {
+union FP16LE {
   unsigned short u;
   struct {
-#if MINIZ_LITTLE_ENDIAN
     uint32_t Mantissa : 10;
     uint32_t Exponent : 5;
     uint32_t Sign : 1;
-#else
+  } s;
+};
+
+union FP16BE {
+  unsigned short u;
+  struct {
     uint32_t Sign : 1;
     uint32_t Exponent : 5;
     uint32_t Mantissa : 10;
-#endif
   } s;
 };
 
@@ -1615,11 +1609,11 @@ union FP16 {
 #pragma clang diagnostic pop
 #endif
 
-static inline FP32 half_to_float(FP16 h) {
-  static const FP32 magic = {113 << 23};
+static inline FP32LE half_to_float_le(FP16LE h) {
+  static const FP32LE magic = {113 << 23};
   static const uint32_t shifted_exp = 0x7c00
                                       << 13;  // exponent mask after shift
-  FP32 o;
+  FP32LE o;
 
   o.u = (h.u & 0x7fffU) << 13U;       // exponent/mantissa bits
   uint32_t exp_ = shifted_exp & o.u;  // just the exponent
@@ -1638,8 +1632,68 @@ static inline FP32 half_to_float(FP16 h) {
   return o;
 }
 
-static inline FP16 float_to_half_full(FP32 f) {
-  FP16 o = {0};
+static inline FP16LE float_to_half_full_le(FP32LE f) {
+  FP16LE o = {0};
+
+  // Based on ISPC reference code (with minor modifications)
+  if (f.s.Exponent == 0)  // Signed zero/denormal (which will underflow)
+    o.s.Exponent = 0;
+  else if (f.s.Exponent == 255)  // Inf or NaN (all exponent bits set)
+  {
+    o.s.Exponent = 31;
+    o.s.Mantissa = f.s.Mantissa ? 0x200 : 0;  // NaN->qNaN and Inf->Inf
+  } else                                      // Normalized number
+  {
+    // Exponent unbias the single, then bias the halfp
+    int newexp = f.s.Exponent - 127 + 15;
+    if (newexp >= 31)  // Overflow, return signed infinity
+      o.s.Exponent = 31;
+    else if (newexp <= 0)  // Underflow
+    {
+      if ((14 - newexp) <= 24)  // Mantissa might be non-zero
+      {
+        uint32_t mant = f.s.Mantissa | 0x800000;  // Hidden 1 bit
+        o.s.Mantissa = mant >> (14 - newexp);
+        if ((mant >> (13 - newexp)) & 1)  // Check for rounding
+          o.u++;  // Round, might overflow into exp bit, but this is OK
+      }
+    } else {
+      o.s.Exponent = static_cast<uint32_t>(newexp);
+      o.s.Mantissa = f.s.Mantissa >> 13;
+      if (f.s.Mantissa & 0x1000)  // Check for rounding
+        o.u++;                    // Round, might overflow to inf, this is OK
+    }
+  }
+
+  o.s.Sign = f.s.Sign;
+  return o;
+}
+
+static inline FP32BE half_to_float_be(FP16BE h) {
+  static const FP32BE magic = {113 << 23};
+  static const uint32_t shifted_exp = 0x7c00
+                                      << 13;  // exponent mask after shift
+  FP32BE o;
+
+  o.u = (h.u & 0x7fffU) << 13U;       // exponent/mantissa bits
+  uint32_t exp_ = shifted_exp & o.u;  // just the exponent
+  o.u += (127 - 15) << 23;            // exponent adjust
+
+  // handle exponent special cases
+  if (exp_ == shifted_exp)    // Inf/NaN?
+    o.u += (128 - 16) << 23;  // extra exp adjust
+  else if (exp_ == 0)         // Zero/Denormal?
+  {
+    o.u += 1 << 23;  // extra exp adjust
+    o.f -= magic.f;  // renormalize
+  }
+
+  o.u |= (h.u & 0x8000U) << 16U;  // sign bit
+  return o;
+}
+
+static inline FP16BE float_to_half_full_le(FP32BE f) {
+  FP16BE o = {0};
 
   // Based on ISPC reference code (with minor modifications)
   if (f.s.Exponent == 0)  // Signed zero/denormal (which will underflow)
@@ -1677,8 +1731,8 @@ static inline FP16 float_to_half_full(FP32 f) {
 
 static inline void swap2(unsigned short *val) {
   unsigned short tmp = *val;
-  unsigned char *dst = reinterpret_cast<unsigned char *>(val);
-  unsigned char *src = reinterpret_cast<unsigned char *>(&tmp);
+  uint8_t *dst = reinterpret_cast<uint8_t *>(val);
+  uint8_t *src = reinterpret_cast<uint8_t *>(&tmp);
 
   dst[0] = src[1];
   dst[1] = src[0];
@@ -1686,8 +1740,8 @@ static inline void swap2(unsigned short *val) {
 
 static inline void swap4(uint32_t *val) {
   uint32_t tmp = *val;
-  unsigned char *dst = reinterpret_cast<unsigned char *>(val);
-  unsigned char *src = reinterpret_cast<unsigned char *>(&tmp);
+  uint8_t *dst = reinterpret_cast<uint8_t *>(val);
+  uint8_t *src = reinterpret_cast<uint8_t *>(&tmp);
 
   dst[0] = src[3];
   dst[1] = src[2];
@@ -1697,8 +1751,8 @@ static inline void swap4(uint32_t *val) {
 
 static inline void swap4(int *val) {
   int tmp = *val;
-  unsigned char *dst = reinterpret_cast<unsigned char *>(val);
-  unsigned char *src = reinterpret_cast<unsigned char *>(&tmp);
+  uint8_t *dst = reinterpret_cast<uint8_t *>(val);
+  uint8_t *src = reinterpret_cast<uint8_t *>(&tmp);
 
   dst[0] = src[3];
   dst[1] = src[2];
@@ -1708,8 +1762,8 @@ static inline void swap4(int *val) {
 
 static inline void swap8(uint64_t *val) {
   uint64_t tmp = (*val);
-  unsigned char *dst = reinterpret_cast<unsigned char *>(val);
-  unsigned char *src = reinterpret_cast<unsigned char *>(&tmp);
+  uint8_t *dst = reinterpret_cast<uint8_t *>(val);
+  uint8_t *src = reinterpret_cast<uint8_t *>(&tmp);
 
   dst[0] = src[7];
   dst[1] = src[6];
@@ -1723,8 +1777,8 @@ static inline void swap8(uint64_t *val) {
 
 static inline void swap8(int64_t *val) {
   int64_t tmp = (*val);
-  unsigned char *dst = reinterpret_cast<unsigned char *>(val);
-  unsigned char *src = reinterpret_cast<unsigned char *>(&tmp);
+  uint8_t *dst = reinterpret_cast<uint8_t *>(val);
+  uint8_t *src = reinterpret_cast<uint8_t *>(&tmp);
 
   dst[0] = src[7];
   dst[1] = src[6];
@@ -1790,12 +1844,12 @@ class StreamReader {
     }
   }
 
-  bool read1(unsigned char *ret) {
+  bool read1(uint8_t *ret) {
     if ((idx_ + 1) > length_) {
       return false;
     }
 
-    const unsigned char val = binary_[idx_];
+    const uint8_t val = binary_[idx_];
 
     (*ret) = val;
     idx_ += 1;
@@ -2025,7 +2079,7 @@ static inline std::string ReadString(StreamReader *sr) {
   sr->read4(&size);
   if (size > 0) {
     std::string buffer(size, ' ');
-    sr->read(size, size, reinterpret_cast<unsigned char *>(&buffer[0]));
+    sr->read(size, size, reinterpret_cast<uint8_t *>(&buffer[0]));
     return buffer;
   }
   return std::string();
@@ -2042,7 +2096,7 @@ static inline bool ReadMetaBool(StreamReader *sr) {
   uint32_t size;
   sr->read4(&size);
   if (size == 1) {
-    sr->read(1, 1, reinterpret_cast<unsigned char *>(&c));
+    sr->read(1, 1, reinterpret_cast<uint8_t *>(&c));
   }
   return bool(c);
 }
@@ -2103,7 +2157,7 @@ static inline bool EndsWidth(std::string const &value,
 #if 0
 template <std::size_t N>
 bool BitMask<N>::load(StreamReader *sr) {
-  std::vector<unsigned char> buf(mask_.size() / 8);
+  std::vector<uint8_t> buf(mask_.size() / 8);
 
   sr->read(mask_.size(), mask_.size(), buf.data());
 
@@ -2111,7 +2165,7 @@ bool BitMask<N>::load(StreamReader *sr) {
   // TODO(syoyo): endian
   for (size_t j = 0; j < mask_.size() / 8; j++) {
     for (size_t i = 0; i < 8; i++) {
-      unsigned char bit = (buf[j] >> i) & 0x1;
+      uint8_t bit = (buf[j] >> i) & 0x1;
       mask_.set(j * 8 + i, bit);
     }
   }
@@ -2120,15 +2174,15 @@ bool BitMask<N>::load(StreamReader *sr) {
 }
 #endif
 
-static bool DecompressZip(unsigned char *dst,
-                          unsigned long *uncompressed_size /* inout */,
-                          const unsigned char *src, unsigned long src_size) {
+static bool DecompressZip(uint8_t *dst,
+                          size_t *uncompressed_size /* inout */,
+                          const uint8_t *src, size_t src_size) {
   if ((*uncompressed_size) == src_size) {
     // Data is not compressed.
     memcpy(dst, src, src_size);
     return true;
   }
-  std::vector<unsigned char> tmpBuf(*uncompressed_size);
+  std::vector<uint8_t> tmpBuf(*uncompressed_size);
 
 #if defined(TINYVDBIO_USE_SYSTEM_ZLIB)
   int ret = uncompress(&tmpBuf.at(0), uncompressed_size, src, src_size);
@@ -2148,23 +2202,27 @@ static bool DecompressZip(unsigned char *dst,
 }
 
 #if defined(TINYVDBIO_USE_BLOSC)
-static bool DecompressBlosc(unsigned char *dst, unsigned long uncompressed_size,
-                            const unsigned char *src, unsigned long src_size) {
+static bool DecompressBlosc(uint8_t *dst, size_t uncompressed_size,
+                            const uint8_t *src, size_t src_size) {
   if (uncompressed_size == src_size) {
     // Data is not compressed.
     memcpy(dst, src, src_size);
     return true;
   }
 
+  std::cout << "DBG: uncompressed_size = " << uncompressed_size << ", src_size = " << src_size << std::endl;
   const int numUncompressedBytes = blosc_decompress_ctx(
       /*src=*/src, /*dest=*/dst, src_size, /*numthreads=*/1);
 
+  std::cout << "DBG: numUncompressedBytes = " << numUncompressedBytes << ", src_size = " << src_size << std::endl;
+
   if (numUncompressedBytes < 1) {
-    std::cout << "numUncompressedBytes = " << numUncompressedBytes << std::endl;
-    return false;
+    // TODO(syoyo): print warning.
+    //
+    // numUncompressedBytes may be 0 for small dataset(e.g. <= 16bytes), so 0 or negative may be accepted.
   }
 
-  if (numUncompressedBytes != int(src_size)) {
+  if (numUncompressedBytes != int(uncompressed_size)) {
     std::cout << "aaa" << std::endl;
     return false;
   }
@@ -2173,19 +2231,19 @@ static bool DecompressBlosc(unsigned char *dst, unsigned long uncompressed_size,
 }
 #endif
 
-static bool ReadAndDecompressData(StreamReader *sr, unsigned char *dst_data,
+static bool ReadAndDecompressData(StreamReader *sr, uint8_t *dst_data,
                                   size_t element_size, size_t count,
                                   uint32_t compression_mask, std::string *warn,
                                   std::string *err) {
   (void)warn;
 
-  if (compression_mask & COMPRESS_BLOSC) {
+  if (compression_mask & TINYVDB_COMPRESS_BLOSC) {
     std::cout << "HACK: BLOSLC" << std::endl;
 
 #if defined(TINYVDBIO_USE_BLOSC)
     // Read the size of the compressed data.
     // A negative size indicates uncompressed data.
-    int64 numCompressedBytes;
+    int64_t numCompressedBytes;
     sr->read8(&numCompressedBytes);
 
     std::cout << "numCompressedBytes " << numCompressedBytes << std::endl;
@@ -2197,8 +2255,8 @@ static bool ReadAndDecompressData(StreamReader *sr, unsigned char *dst_data,
         sr->read(element_size * count, element_size * count, dst_data);
       }
     } else {
-      unsigned long uncompressed_size = element_size * count;
-      std::vector<unsigned char> buf;
+      size_t uncompressed_size = element_size * count;
+      std::vector<uint8_t> buf;
       buf.resize(size_t(numCompressedBytes));
 
       if (!sr->read(size_t(numCompressedBytes), size_t(numCompressedBytes),
@@ -2229,7 +2287,7 @@ static bool ReadAndDecompressData(StreamReader *sr, unsigned char *dst_data,
     }
     return false;
 #endif
-  } else if (compression_mask & COMPRESS_ZIP) {
+  } else if (compression_mask & TINYVDB_COMPRESS_ZIP) {
     // Read the size of the compressed data.
     // A negative size indicates uncompressed data.
     int64_t numZippedBytes;
@@ -2244,8 +2302,8 @@ static bool ReadAndDecompressData(StreamReader *sr, unsigned char *dst_data,
         sr->read(element_size * count, element_size * count, dst_data);
       }
     } else {
-      unsigned long uncompressed_size = element_size * count;
-      std::vector<unsigned char> buf;
+      size_t uncompressed_size = element_size * count;
+      std::vector<uint8_t> buf;
       buf.resize(size_t(numZippedBytes));
 
       if (!sr->read(size_t(numZippedBytes), size_t(numZippedBytes),
@@ -2301,7 +2359,7 @@ static bool ReadAndDecompressData(StreamReader *sr, unsigned char *dst_data,
 
 static bool ReadValues(StreamReader *sr, const uint32_t compression_flags,
                        size_t num_values, ValueType value_type,
-                       std::vector<unsigned char> *values, std::string *warn,
+                       std::vector<uint8_t> *values, std::string *warn,
                        std::string *err) {
   // usually fp16 or fp32
   TINYVDBIO_ASSERT((value_type == VALUE_TYPE_FLOAT) ||
@@ -2328,12 +2386,12 @@ static bool ReadMaskValues(StreamReader *sr, const uint32_t compression_flags,
                            const uint32_t file_version, const Value background,
                            size_t num_values, ValueType value_type,
                            NodeMask value_mask,
-                           std::vector<unsigned char> *values,
+                           std::vector<uint8_t> *values,
                            std::string *warn, std::string *err) {
   // Advance stream position when destination buffer is null.
   const bool seek = (values == NULL);
 
-  const bool mask_compressed = compression_flags & COMPRESS_ACTIVE_MASK;
+  const bool mask_compressed = compression_flags & TINYVDB_COMPRESS_ACTIVE_MASK;
 
   char per_node_flag = NO_MASK_AND_ALL_VALS;
   if (file_version >= TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
@@ -2393,7 +2451,7 @@ static bool ReadMaskValues(StreamReader *sr, const uint32_t compression_flags,
 
   std::cout << "read num = " << read_count << std::endl;
 
-  std::vector<unsigned char> tmp_buf(read_count * GetValueTypeSize(value_type));
+  std::vector<uint8_t> tmp_buf(read_count * GetValueTypeSize(value_type));
 
   // Read mask data.
   if (!ReadAndDecompressData(sr, tmp_buf.data(), GetValueTypeSize(value_type),
@@ -2602,7 +2660,7 @@ bool InternalOrLeafNode::ReadTopology(StreamReader *sr, const int level,
                      : NUM_VALUES);
 
     {
-      std::vector<unsigned char> values;
+      std::vector<uint8_t> values;
       values.resize(
           GetValueTypeSize(grid_layout_info_.GetNodeInfo(level).value_type()) *
           size_t(num_values));
@@ -2733,7 +2791,7 @@ bool InternalOrLeafNode::ReadBuffer(StreamReader *sr, int level,
     }
 
     const bool mask_compressed =
-        params.compression_flags & COMPRESS_ACTIVE_MASK;
+        params.compression_flags & TINYVDB_COMPRESS_ACTIVE_MASK;
 
     const bool seek = false;
 
@@ -2794,14 +2852,14 @@ GridDescriptor::GridDescriptor(const std::string &name,
 
 // GridDescriptor::~GridDescriptor() {}
 
-std::string GridDescriptor::AddSuffix(const std::string &name, int n) {
+std::string GridDescriptor::AddSuffix(const std::string &name, int n, const std::string &separator) {
   std::ostringstream ss;
-  ss << name << SEP << n;
+  ss << name << separator << n;
   return ss.str();
 }
 
-std::string GridDescriptor::StripSuffix(const std::string &name) {
-  return name.substr(0, name.find(SEP));
+std::string GridDescriptor::StripSuffix(const std::string &name, const std::string &separator) {
+  return name.substr(0, name.find(separator));
 }
 
 bool GridDescriptor::Read(StreamReader *sr, const uint32_t file_version,
@@ -2812,6 +2870,12 @@ bool GridDescriptor::Read(StreamReader *sr, const uint32_t file_version,
   grid_name_ = StripSuffix(unique_name_);
 
   grid_type_ = ReadString(sr);
+
+  // In order not to break backward compatibility with existing VDB files,
+  // grids stored using 16-bit half floats are flagged by adding the following
+  // suffix to the grid's type name on output.  The suffix is removed on input
+  // and the grid's "save float as half" flag set accordingly.
+  const char *HALF_FLOAT_TYPENAME_SUFFIX = "_HalfFloat";
 
   if (EndsWidth(grid_type_, HALF_FLOAT_TYPENAME_SUFFIX)) {
     save_float_as_half_ = true;
@@ -2924,7 +2988,7 @@ static bool ReadMeta(StreamReader *sr) {
       std::vector<char> data;
       data.resize(size_t(num_bytes));
       sr->read(size_t(num_bytes), uint64_t(num_bytes),
-               reinterpret_cast<unsigned char *>(data.data()));
+               reinterpret_cast<uint8_t *>(data.data()));
     }
   }
 
@@ -2951,7 +3015,7 @@ static bool ReadGridDescriptors(StreamReader *sr, const uint32_t file_version,
     //  // Add the descriptor to the dictionary.
     (*gd_map)[gd.GridName()] = gd;
 
-    // Skip forward to the next descriptor.
+    // Move to the next descriptor.
     sr->seek_set(gd.EndByteOffset());
   }
 
@@ -3010,7 +3074,7 @@ static bool ReadTransform(StreamReader *sr, std::string *err) {
 }
 
 static uint32_t ReadGridCompression(StreamReader *sr, uint32_t file_version) {
-  uint32_t compression = COMPRESS_NONE;
+  uint32_t compression = TINYVDB_COMPRESS_NONE;
   if (file_version >= TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
     sr->read4(&compression);
   }
@@ -3098,7 +3162,7 @@ VDBStatus ParseVDBHeader(const std::string &filename, VDBHeader *header,
   }
 
   // TODO(Syoyo): Load only header region.
-  std::vector<unsigned char> data;
+  std::vector<uint8_t> data;
   {
     std::ifstream ifs(filename.c_str(), std::ifstream::binary);
     if (!ifs) {
@@ -3149,7 +3213,7 @@ static bool IsBigEndian(void) {
   return bint.c[0] == 1;
 }
 
-VDBStatus ParseVDBHeader(const unsigned char *data, const size_t len,
+VDBStatus ParseVDBHeader(const uint8_t *data, const size_t len,
                          VDBHeader *header, std::string *err) {
   int64_t magic;
 
@@ -3236,17 +3300,15 @@ VDBStatus ParseVDBHeader(const unsigned char *data, const size_t len,
   if (file_version >= TINYVDB_FILE_VERSION_SELECTIVE_COMPRESSION &&
       file_version < TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
     sr.read1(&is_compressed);
-    std::cout << "Compression : " << (is_compressed != 0 ? "zip" : "none")
+    std::cout << "Global Compression : " << (is_compressed != 0 ? "zip" : "none")
               << std::endl;
-    if (file_version >= TINYVDB_FILE_VERSION_BLOSC_COMPRESSION) {
-    }
   }
 
   // 6) Read uuid.
   {
-    // ASCII UUID = 32 chars + 4 '-''s = 36 bytes.
+    // ASCII UUID = 32 chars + 4 hyphens('-') = 36 bytes.
     char uuid[36];
-    sr.read(36, 36, reinterpret_cast<unsigned char *>(uuid));
+    sr.read(36, 36, reinterpret_cast<uint8_t *>(uuid));
     std::string uuid_string = std::string(uuid, 36);
     // TODO(syoyo): Store UUID somewhere.
     std::cout << "uuid ASCII: " << uuid_string << std::endl;
@@ -3267,7 +3329,7 @@ VDBStatus ReadGridDescriptors(const std::string &filename,
                               const VDBHeader &header,
                               std::map<std::string, GridDescriptor> *gd_map,
                               std::string *err) {
-  std::vector<unsigned char> data;
+  std::vector<uint8_t> data;
   {
     std::ifstream ifs(filename.c_str(), std::ifstream::binary);
     if (!ifs) {
@@ -3310,7 +3372,7 @@ VDBStatus ReadGridDescriptors(const std::string &filename,
   return status;
 }
 
-VDBStatus ReadGridDescriptors(const unsigned char *data, const size_t data_len,
+VDBStatus ReadGridDescriptors(const uint8_t *data, const size_t data_len,
                               const VDBHeader &header,
                               std::map<std::string, GridDescriptor> *gd_map,
                               std::string *err) {
@@ -3343,7 +3405,7 @@ VDBStatus ReadGridDescriptors(const unsigned char *data, const size_t data_len,
 VDBStatus ReadGrids(const std::string &filename, const VDBHeader &header,
                     const std::map<std::string, GridDescriptor> &gd_map,
                     std::string *warn, std::string *err) {
-  std::vector<unsigned char> data;
+  std::vector<uint8_t> data;
   {
     std::ifstream ifs(filename.c_str(), std::ifstream::binary);
     if (!ifs) {
@@ -3386,18 +3448,16 @@ VDBStatus ReadGrids(const std::string &filename, const VDBHeader &header,
   return status;
 }
 
-VDBStatus ReadGrids(const unsigned char *data, const size_t data_len,
+VDBStatus ReadGrids(const uint8_t *data, const size_t data_len,
                     const VDBHeader &header,
                     const std::map<std::string, GridDescriptor> &gd_map,
                     std::string *warn, std::string *err) {
   bool swap_endian = IsBigEndian();
   StreamReader sr(data, data_len, swap_endian);
 
-  std::map<std::string, GridDescriptor>::const_iterator it(gd_map.begin());
-  std::map<std::string, GridDescriptor>::const_iterator itEnd(gd_map.end());
-
-  for (; it != itEnd; it++) {
-    const GridDescriptor &gd = it->second;
+  std::cout << "AAA: num_grids = " << gd_map.size() << "\n";
+  for (const auto &it : gd_map) {
+    const GridDescriptor &gd = it.second;
 
     sr.seek_set(gd.GridByteOffset());
 
