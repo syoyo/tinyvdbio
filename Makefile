@@ -15,5 +15,5 @@ BLOSC_LIB=./third_party/c-blosc/build/blosc/libblosc.a
 # BLOSC(static lib) version
 
 all:
-	clang -Wno-#pragma-messages -c -g -O1 miniz.c
-	clang++ -o loader_test -DTINYVDBIO_USE_BLOSC $(BLOSC_INC) -O3 -g -Weverything -Werror -Wno-c++98-compat loader_test.cc miniz.o $(BLOSC_LIB) -pthread
+	clang -Wno-#pragma-messages -c -g -O1 src/miniz.c
+	clang++ -o loader_test -DTINYVDBIO_USE_BLOSC $(BLOSC_INC) -I./src -O3 -g -Weverything -Werror -Wno-c++98-compat tests/loader_test.cc miniz.o $(BLOSC_LIB) -pthread

@@ -1504,6 +1504,8 @@ bool SaveVDB(const std::string &filename, std::string *err);
 #ifdef TINYVDBIO_IMPLEMENTATION
 
 #if !defined(TINYVDBIO_USE_SYSTEM_ZLIB)
+
+#define MINIZ_NO_STDIO
 extern "C" {
 #include "miniz.h"
 }

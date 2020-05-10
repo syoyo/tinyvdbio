@@ -39,7 +39,7 @@ Currently, only `FloatTree`(`tree::Tree4<float,       5, 4, 3>::Type`) topology 
 
 ## How to use
 
-Simply copy `tinyvdbio.h` and `miniz.c` and `miniz.h` to your project.
+Simply copy `src/tinyvdbio.h` and `src/miniz.c` and `src/miniz.h` to your project.
 Recent OpenVDB file(223~) are usually compressed using BLOSC, so it is highly recommended to enable BLOSC suppor(see the below for compiliation).
 
 ## Compile flags
@@ -80,6 +80,24 @@ $ cd build
 $ cmake ..
 $ make
 ```
+
+## CMake build
+
+CMake build is provided for example/test build.
+
+### Linux
+
+```
+$ mkdir build
+$ cd build
+$ cmake ..
+$ make
+```
+
+### CMake options
+
+* TINYVDBIO_USE_BLOSC : Enable Blosc compression. In cmake build, blosc is built with `add_subdirectory`
+* TINYVDBIO_USE_SYSTEM_ZLIB : Use system zlib.
 
 ## Notes
 
