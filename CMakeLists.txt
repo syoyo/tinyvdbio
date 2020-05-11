@@ -66,7 +66,7 @@ if (NOT TINYVDBIO_USE_SYSTEM_ZLIB)
 endif (NOT TINYVDBIO_USE_SYSTEM_ZLIB)
 
 if (TINYVDBIO_USE_BLOSC)
- 
+
   # Use cmake FUNCTION feature to define cmake variables only effective for c-blosc project
   # https://stackoverflow.com/questions/41700463/push-pop-a-cmake-variable
   function ( add_blosc_lib )
@@ -76,7 +76,7 @@ if (TINYVDBIO_USE_BLOSC)
     # TODO(syoyo): Only disable SSE2 for non-x86 platforms
     set(DEACTIVATE_SSE2 OFF CACHE INTERNAL "" FORCE)
     set(DEACTIVATE_AVX2 OFF CACHE INTERNAL "" FORCE)
- 
+
     # TODO(syoyo): Enable shared blosc.so build
     set(BUILD_SHARED OFF CACHE INTERNAL "" FORCE)
 
@@ -97,7 +97,7 @@ target_include_directories(${BUILD_TARGET} PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(${BUILD_TARGET} ${TINYVDBIO_EXT_LIBRARIES} ${CMAKE_DL_LIBS})
 
 if (TINYVDBIO_USE_SYSTEM_ZLIB)
-  target_compile_definitions(${BUILD_TARGET} PRIVATE "TINYVDBIO_SUPPORT_EXR")
+  target_compile_definitions(${BUILD_TARGET} PRIVATE "TINYVDBIO_USE_SYSTEM_ZLIB")
 endif (TINYVDBIO_USE_SYSTEM_ZLIB)
 
 if (TINYVDBIO_USE_BLOSC)
