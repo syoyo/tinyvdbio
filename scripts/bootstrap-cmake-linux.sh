@@ -9,4 +9,4 @@ mkdir ${builddir}
 export CXX=clang++
 export CC=clang
 
-cd ${builddir} && cmake ..
+cd ${builddir} && cmake .. && cd ..
