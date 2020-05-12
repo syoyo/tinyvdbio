@@ -15,7 +15,9 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v1
+        uses: actions/checkout@v2
+        with:
+          submodules: true
       - name: CmakeAndBuild
         run: |
             sudo apt-get update
@@ -32,7 +34,9 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v1
+        uses: actions/checkout@v2
+        with:
+          submodules: true
       - name: CmakeAndBuild
         run: |
             sudo apt-get update
@@ -52,7 +56,9 @@ jobs:
     # https://help.github.com/en/actions/reference/software-installed-on-github-hosted-runners
     steps:
       - name: Checkout
-        uses: actions/checkout@v1
+        uses: actions/checkout@v2
+        with:
+          submodules: true
       - name: Configure
         run: .\vcsetup-2019.bat
       - name: Build
@@ -66,7 +72,9 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v1
+        uses: actions/checkout@v2
+        with:
+          submodules: true
       - name: CmakeAndBuild
         run: |
             sudo apt-get update
