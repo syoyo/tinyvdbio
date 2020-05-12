@@ -2192,13 +2192,15 @@ static bool DecompressZip(uint8_t *dst,
     return false;
   }
 #else
-  int ret = mz_uncompress(&tmpBuf.at(0), uncompressed_size, src, src_size);
+  mz_ulong sz = static_cast<mz_ulong>(*uncompressed_size); // 32bit in Win64 llvm-mingw(clang)
+  int ret = mz_uncompress(&tmpBuf.at(0), &sz, src, static_cast<mz_ulong>(src_size));
   if (MZ_OK != ret) {
     return false;
   }
+  (*uncompressed_size) = size_t(sz);
 #endif
 
-  memcpy(dst, tmpBuf.data(), size_t(uncompressed_size));
+  memcpy(dst, tmpBuf.data(), (*uncompressed_size));
 
   return true;
 }
