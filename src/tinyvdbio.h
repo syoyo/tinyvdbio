@@ -41,6 +41,13 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <algorithm>
+
+#if defined(_MSC_VER) || defined(__MINGW32__)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#endif
 
 namespace tinyvdb {
 

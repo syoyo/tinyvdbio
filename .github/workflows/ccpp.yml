@@ -43,7 +43,7 @@ jobs:
             sudo apt-get install -y build-essential
             sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
             ./scripts/bootstrap-gcc-aarch64-cross.sh
-            cd build-cross && make VERBOSE=1
+            cd build-aarch64-cross && make VERBOSE=1
 
 
   # Windows(x64) + Visual Studio 2019 build
