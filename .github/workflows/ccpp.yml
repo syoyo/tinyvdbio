@@ -37,7 +37,7 @@ jobs:
         run: |
             sudo apt-get update
             sudo apt-get install -y build-essential
-            sudo apt-get install -y gcc-8-aarch64-linux-gnu g++-8-aarch64-linux-gnu
+            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
             ./scripts/bootstrap-gcc-aarch64-cross.sh
             cd build-cross && make VERBOSE=1
 
@@ -63,7 +63,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v1
     - name: configure
       run: ./scripts/bootstrap-cmake-linux.sh
     - name: make
