@@ -58,6 +58,24 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+  # MinGW W64 + gcc cross build
+  build-mingw-cross:
+
+    runs-on: ubuntu-18.04
+    name: Cross compiling with mingw-w64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+      - name: CmakeAndBuild
+        run: |
+            sudo apt-get update
+            sudo apt-get install -y build-essential
+            sudo apt-get install -y mingw-w64
+            ./scripts/bootstrap-cmake-mingw-gcc-cross.sh 
+            cd build-mingw && make VERBOSE=1
+
+
   # Native build with distro's defaultg gcc
   build-native-gcc:
     runs-on: ubuntu-latest
