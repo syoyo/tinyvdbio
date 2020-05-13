@@ -57,6 +57,11 @@ set(TINYVDBIO_SOURCES
 set(TINYVDBIO_DEP_SOURCES
   )
 
+# Force use system zlib for IOS
+if (IOS)
+  set(TINYVDBIO_USE_SYSTEM_ZLIB ON CACHE INTERNAL "" FORCE)
+endif (IOS)
+
 if (NOT TINYVDBIO_USE_SYSTEM_ZLIB)
   list(APPEND TINYVDBIO_DEP_SOURCES
     ${PROJECT_SOURCE_DIR}/src/miniz.c
@@ -81,7 +86,11 @@ if (TINYVDBIO_USE_BLOSC)
     set(BUILD_SHARED OFF CACHE INTERNAL "" FORCE)
 
     # It looks OpenVDB does not use zstd so disable it
-    set(DEACTIVATE_ZSTD OFF CACHE INTERNAL "" FORCE)
+    set(DEACTIVATE_ZSTD ON CACHE INTERNAL "" FORCE)
+
+    if (IOS)
+      set(DEACTIVATE_ZLIB ON CACHE INTERNAL "" FORCE)
+    endif (IOS)
 
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/c-blosc)
   endfunction ()
