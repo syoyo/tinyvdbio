@@ -98,6 +98,7 @@ $ make
 
 * TINYVDBIO_USE_BLOSC : Enable Blosc compression. In cmake build, blosc is built with `add_subdirectory`
 * TINYVDBIO_USE_SYSTEM_ZLIB : Use system zlib.
+  * Optinally you can specify path to zlib with `ZLIB_ROOT` https://cmake.org/cmake/help/latest/module/FindZLIB.html
 
 ## Notes
 

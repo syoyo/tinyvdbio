@@ -62,13 +62,15 @@ if (IOS)
   set(TINYVDBIO_USE_SYSTEM_ZLIB ON CACHE INTERNAL "" FORCE)
 endif (IOS)
 
-if (NOT TINYVDBIO_USE_SYSTEM_ZLIB)
+if (TINYVDBIO_USE_SYSTEM_ZLIB)
+  find_package(zlib REQUIRED)
+else (TINYVDBIO_USE_SYSTEM_ZLIB)
   list(APPEND TINYVDBIO_DEP_SOURCES
     ${PROJECT_SOURCE_DIR}/src/miniz.c
   )
 
   list(APPEND TINYVDBIO_EXT_LIBRARIES blosc_static)
-endif (NOT TINYVDBIO_USE_SYSTEM_ZLIB)
+endif (TINYVDBIO_USE_SYSTEM_ZLIB)
 
 if (TINYVDBIO_USE_BLOSC)
 
@@ -107,6 +109,7 @@ target_link_libraries(${BUILD_TARGET} ${TINYVDBIO_EXT_LIBRARIES} ${CMAKE_DL_LIBS
 
 if (TINYVDBIO_USE_SYSTEM_ZLIB)
   target_compile_definitions(${BUILD_TARGET} PRIVATE "TINYVDBIO_USE_SYSTEM_ZLIB")
+  target_link_libraries(${BUILD_TARGET} PUBLIC ZLIB::ZLIB)
 endif (TINYVDBIO_USE_SYSTEM_ZLIB)
 
 if (TINYVDBIO_USE_BLOSC)
@@ -131,6 +134,11 @@ if (TINYVDBIO_BUILD_TESTS)
 
   add_executable(${TEST_TARGET} ${TINYVDBIO_TEST_SOURCES})
   add_sanitizers(${TEST_TARGET})
+
+  if (TINYVDBIO_USE_SYSTEM_ZLIB)
+    target_compile_definitions(${TEST_TARGET} PRIVATE "TINYVDBIO_USE_SYSTEM_ZLIB")
+    target_link_libraries(${TEST_TARGET} PUBLIC ZLIB::ZLIB)
+  endif (TINYVDBIO_USE_SYSTEM_ZLIB)
 
   target_include_directories(${TEST_TARGET} PRIVATE ${PROJECT_SOURCE_DIR}/src
                                                     ${PROJECT_SOURCE_DIR}/tests)
