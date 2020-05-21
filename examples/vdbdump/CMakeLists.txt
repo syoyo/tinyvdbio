@@ -13,7 +13,7 @@ target_include_directories(${EXAMPLE_TARGET} PRIVATE ${PROJECT_SOURCE_DIR}/src)
 # for clipp.h
 target_include_directories(${EXAMPLE_TARGET} PRIVATE ${PROJECT_SOURCE_DIR}/examples/common)
 
-target_link_libraries(${EXAMPLE_TARGET} tinyvdbio)
+target_link_libraries(${EXAMPLE_TARGET} PRIVATE tinyvdbio)
 
 if (TINYVDBIO_USE_SYSTEM_ZLIB)
   target_compile_definitions(${EXAMPLE_TARGET} PRIVATE "TINYVDBIO_USE_SYSTEM_ZLIB")
