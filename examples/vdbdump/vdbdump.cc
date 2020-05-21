@@ -3,6 +3,11 @@
 #include <iostream>
 #include <fstream>
 
+#if defined(TINYVDBIO_USE_SYSTEM_ZLIB)
+// or include your own zlib header here.
+#include <zlib.h>
+#endif
+
 #define TINYVDBIO_IMPLEMENTATION
 #include "tinyvdbio.h"
 
