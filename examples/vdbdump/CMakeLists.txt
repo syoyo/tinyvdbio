@@ -20,4 +20,9 @@ if (TINYVDBIO_USE_SYSTEM_ZLIB)
   target_link_libraries(${EXAMPLE_TARGET} PUBLIC ZLIB::ZLIB)
 endif (TINYVDBIO_USE_SYSTEM_ZLIB)
 
+if (TINYVDBIO_USE_BLOSC)
+  target_include_directories(${EXAMPLE_TARGET} PRIVATE ${PROJECT_SOURCE_DIR}/third_party/c-blosc/blosc)
+  target_compile_definitions(${EXAMPLE_TARGET} PRIVATE "TINYVDBIO_USE_BLOSC")
+endif (TINYVDBIO_USE_BLOSC)
+
 set_target_properties(${EXAMPLE_TARGET} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
