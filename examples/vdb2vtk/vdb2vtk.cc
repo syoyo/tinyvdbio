@@ -14,6 +14,55 @@ struct Extent
 
 int main(int argc, char **argv)
 {
+  if (argc < 3) {
+    std::cout << argv[0] << " input.vdb output.vtki\n";
+    return EXIT_FAILURE;
+  }
+
+  std::string input_filename = argv[1];
+  std::string output_filename = argv[2];
+
+  // 1. Parse VDB header
+  tinyvdb::VDBHeader header;
+  std::string warn;
+  std::string err;
+  tinyvdb::VDBStatus status = tinyvdb::ParseVDBHeader(input_filename, &header, &err);
+
+  if (status != tinyvdb::TINYVDBIO_SUCCESS) {
+    if (!err.empty()) {
+      std::cerr << err << std::endl;
+    }
+    return EXIT_FAILURE;
+  }
+
+  // 2. Read Grid descriptors
+  std::map<std::string, tinyvdb::GridDescriptor> gd_map;
+
+  status = tinyvdb::ReadGridDescriptors(input_filename, header, &gd_map, &err);
+  if (status != tinyvdb::TINYVDBIO_SUCCESS) {
+    if (!err.empty()) {
+      std::cerr << err << std::endl;
+    }
+    return EXIT_FAILURE;
+  }
+
+  std::cout << "# of grid descriptors = " << gd_map.size() << std::endl;
+
+  status = tinyvdb::ReadGrids(input_filename, header, gd_map, &warn, &err);
+  if (!warn.empty()) {
+    std::cout << warn << std::endl;
+  }
+  if (status != tinyvdb::TINYVDBIO_SUCCESS) {
+    if (!err.empty()) {
+      std::cerr << err << std::endl;
+    }
+    return EXIT_FAILURE;
+  }
+
+  for (const auto &desc : gd_map) {
+    std::cout << "name: " << desc.second.GridName() << "\n"; 
+  }
+
   std::array<double, 3> origin{};
   std::array<double, 3> spacing{};
 
