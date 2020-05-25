@@ -381,123 +381,6 @@ class StreamReader;
 class StreamWriter;
 struct DeserializeParams;
 
-#if 0             // TODO(syoyo): Remove
-
-/// Return the number of on bits in the given 8-bit value.
-inline int32_t CountOn(uint8_t v) {
-// Simple LUT:
-#ifndef _MSC_VER  // Visual C++ doesn't guarantee thread-safe initialization of
-                  // local statics
-  static
-#endif
-      /// @todo Move this table and others into, say, Util.cc
-      const uint8_t numBits[256] = {
-#define COUNTONB2(n) n, n + 1, n + 1, n + 2
-#define COUNTONB4(n) \
-  COUNTONB2(n), COUNTONB2(n + 1), COUNTONB2(n + 1), COUNTONB2(n + 2)
-#define COUNTONB6(n) \
-  COUNTONB4(n), COUNTONB4(n + 1), COUNTONB4(n + 1), COUNTONB4(n + 2)
-          COUNTONB6(0), COUNTONB6(1), COUNTONB6(1), COUNTONB6(2)};
-  return numBits[v];
-#undef COUNTONB6
-#undef COUNTONB4
-#undef COUNTONB2
-
-  // Sequentially clear least significant bits
-  // int32_t c;
-  // for (c = 0; v; c++)  v &= v - 0x01U;
-  // return c;
-
-  // This version is only fast on CPUs with fast "%" and "*" operations
-  // return (v * UINT64_C(0x200040008001) & UINT64_C(0x111111111111111)) % 0xF;
-}
-
-/// Return the number of off bits in the given 8-bit value.
-inline int32_t CountOff(uint8_t v) {
-  return CountOn(static_cast<uint8_t>(~v));
-}
-
-/// Return the number of on bits in the given 32-bit value.
-inline int32_t CountOn(int32_t v) {
-  v = v - ((v >> 1) & 0x55555555U);
-  v = (v & 0x33333333U) + ((v >> 2) & 0x33333333U);
-  return (((v + (v >> 4)) & 0xF0F0F0FU) * 0x1010101U) >> 24;
-}
-
-/// Return the number of off bits in the given 32-bit value.
-inline int32_t CountOff(int32_t v) { return CountOn(~v); }
-
-/// Return the number of on bits in the given 64-bit value.
-inline int32_t CountOn(int64 v) {
-  v = v - ((v >> 1) & 0x5555555555555555);
-  v = (v & 0x3333333333333333) + ((v >> 2) & 0x3333333333333333);
-  return static_cast<int32>(
-      (((v + (v >> 4)) & 0xF0F0F0F0F0F0F0F) * 0x101010101010101) >> 56);
-}
-
-/// Return the number of off bits in the given 64-bit value.
-inline int32_t CountOff(int64 v) { return CountOn(~v); }
-
-/// Return the least significant on bit of the given 8-bit value.
-inline int32_t FindLowestOn(uint8_t v) {
-  TINYVDBIO_ASSERT(v);
-#ifndef _MSC_VER  // Visual C++ doesn't guarantee thread-safe initialization of
-                  // local statics
-  static
-#endif
-      const uint8_t DeBruijn[8] = {0, 1, 6, 2, 7, 5, 4, 3};
-  return DeBruijn[static_cast<uint8_t>((v & -v) * 0x1DU) >> 5];
-}
-
-/// Return the least significant on bit of the given 32-bit value.
-inline int32_t FindLowestOn(int32_t v) {
-  TINYVDBIO_ASSERT(v);
-  // return ffs(v);
-#ifndef _MSC_VER  // Visual C++ doesn't guarantee thread-safe initialization of
-                  // local statics
-  static
-#endif
-      const uint8_t DeBruijn[32] = {
-          0,  1,  28, 2,  29, 14, 24, 3, 30, 22, 20, 15, 25, 17, 4,  8,
-          31, 27, 13, 23, 21, 19, 16, 7, 26, 12, 18, 6,  11, 5,  10, 9};
-  return DeBruijn[int32((v & -v) * 0x077CB531U) >> 27];
-}
-
-/// Return the least significant on bit of the given 64-bit value.
-inline int32_t FindLowestOn(int64 v) {
-  TINYVDBIO_ASSERT(v);
-  // return ffsll(v);
-#ifndef _MSC_VER  // Visual C++ doesn't guarantee thread-safe initialization of
-                  // local statics
-  static
-#endif
-      const uint8_t DeBruijn[64] = {
-          0,  1,  2,  53, 3,  7,  54, 27, 4,  38, 41, 8,  34, 55, 48, 28,
-          62, 5,  39, 46, 44, 42, 22, 9,  24, 35, 59, 56, 49, 18, 29, 11,
-          63, 52, 6,  26, 37, 40, 33, 47, 61, 45, 43, 21, 23, 58, 17, 10,
-          51, 25, 36, 32, 60, 20, 57, 16, 50, 31, 19, 15, 30, 14, 13, 12,
-      };
-  return DeBruijn[int64((v & -v) * 0x022FDD63CC95386D) >> 58];
-}
-
-/// Return the most significant on bit of the given 32-bit value.
-inline int32_t FindHighestOn(int32_t v) {
-#ifndef _MSC_VER  // Visual C++ doesn't guarantee thread-safe initialization of
-                  // local statics
-  static
-#endif
-      const uint8_t DeBruijn[32] = {
-          0, 9,  1,  10, 13, 21, 2,  29, 11, 14, 16, 18, 22, 25, 3, 30,
-          8, 12, 20, 28, 15, 17, 24, 7,  19, 27, 23, 6,  26, 5,  4, 31};
-  v |= v >> 1;  // first round down to one less than a power of 2
-  v |= v >> 2;
-  v |= v >> 4;
-  v |= v >> 8;
-  v |= v >> 16;
-  return DeBruijn[int32(v * 0x07C4ACDDU) >> 27];
-}
-#endif
-
 ////////////////////////////////////////
 
 /// internal Per-node indicator byte that specifies what additional metadata
@@ -863,11 +746,17 @@ class NodeMask {
   void seek(std::istream &is) const {
     is.seekg(int64_t(bits.size()), std::ios_base::cur);
   }
+
   /// @brief simple print method for debugging
   void printInfo(std::ostream &os = std::cout) const {
     os << "NodeMask: Dim=" << DIM << " Log2Dim=" << LOG2DIM
        << " Bit count=" << BITSIZE << std::endl;
   }
+
+  std::string bitString() const {
+    return bits.to_string();
+  }
+
 #if 0
   void printBits(std::ostream &os = std::cout, int32_t max_out = 80u) const {
     const int32_t n = (SIZE > max_out ? max_out : SIZE);
@@ -1536,6 +1425,80 @@ extern "C" {
 #endif
 
 namespace tinyvdb {
+
+
+
+namespace {
+
+#if defined(_WIN32)
+
+static inline std::wstring utf8_to_wchar(const std::string &str) {
+  int wstr_size =
+      MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), NULL, 0);
+  std::wstring wstr(wstr_size, 0);
+  MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), &wstr[0],
+                      (int)wstr.size());
+  return wstr;
+}
+
+#endif
+
+// TODO(syoyo): Use mmap
+std::vector<uint8_t> read_file_binary(const std::string &filename,std::string *err)
+{
+  std::vector<uint8_t> buf;
+
+#if defined(_WIN32)
+  // Support UTF-8 filenames
+
+  std::wifstream ifs(utf8_to_wchar(filename), std::wifstream::binary);
+
+#else
+
+  // Assume system have native UTF-8 suport
+  std::ifstream ifs(filename, std::ifstream::binary);
+
+#endif
+
+
+  // TODO(syoyo): Use wstring for error message on Win32?
+  if (!ifs) {
+    if (err) {
+      (*err) = "File not found or cannot open file : " + filename;
+    }
+    return buf;
+  }
+
+  ifs.seekg(0, ifs.end);
+  size_t sz = static_cast<size_t>(ifs.tellg());
+  if (int64_t(sz) < 0) {
+    // Looks reading directory, not a file.
+    if (err) {
+      (*err) += "Looks like filename is a directory : \"" + filename + "\"\n";
+    }
+    return buf;
+  }
+
+  if (sz < 16) {
+    // ???
+    if (err) {
+      (*err) +=
+          "File size too short. Looks like this file is not a VDB : \"" +
+          filename + "\"\n";
+    }
+    return buf;
+  }
+
+  buf.resize(sz);
+
+  ifs.seekg(0, ifs.beg);
+  ifs.read(reinterpret_cast<char *>(&buf.at(0)),
+           static_cast<std::streamsize>(sz));
+
+  return buf;
+}
+
+} // namespace local
 
 std::ostream &operator<<(std::ostream &os, const Boundsi &bound) {
   os << "Boundsi bmin(" << bound.bmin.x << ", " << bound.bmin.y << ", "
@@ -2784,6 +2747,8 @@ bool InternalOrLeafNode::ReadBuffer(StreamReader *sr, int level,
     std::cout << "LeafNode.ReadBuffer pos = " << sr->tell() << std::endl;
     std::cout << " value_mask_.size = " << value_mask_.memUsage() << std::endl;
 
+    std::cout << " value_mask.bits = " << value_mask_.bitString() << "\n";
+
     // Seek over the value mask.
     sr->seek_from_currect(int64_t(value_mask_.memUsage()));
 
@@ -2825,6 +2790,7 @@ bool InternalOrLeafNode::ReadBuffer(StreamReader *sr, int level,
     if (mask_compressed && per_node_flag != NO_MASK_AND_ALL_VALS &&
         (params.file_version >= TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION)) {
       read_count = size_t(value_mask_.count_on());
+      std::cout << "value_mask_.count_on = " << read_count << std::endl;
     }
 
     std::cout << "read_count = " << read_count << std::endl;
@@ -2833,9 +2799,20 @@ bool InternalOrLeafNode::ReadBuffer(StreamReader *sr, int level,
         read_count *
         GetValueTypeSize(grid_layout_info_.GetNodeInfo(level).value_type()));
 
+    std::cout << "data.size = " << data_.size() << "\n";
+
+    // Data is tightly packed and compressed.
     bool ret = ReadValues(sr, params.compression_flags, read_count,
                           grid_layout_info_.GetNodeInfo(level).value_type(),
                           &data_, warn, err);
+
+    // HACK
+    if (4 == GetValueTypeSize(grid_layout_info_.GetNodeInfo(level).value_type())) {
+      const float *ptr = reinterpret_cast<const float *>(data_.data());
+      for (size_t i = 0; i < read_count; i++) {
+        std::cout << "[" << i << "] = " << ptr[i] << "\n";
+      }
+    }
 
     return ret;
   }
@@ -3173,42 +3150,9 @@ VDBStatus ParseVDBHeader(const std::string &filename, VDBHeader *header,
   }
 
   // TODO(Syoyo): Load only header region.
-  std::vector<uint8_t> data;
-  {
-    std::ifstream ifs(filename.c_str(), std::ifstream::binary);
-    if (!ifs) {
-      if (err) {
-        (*err) = "File not found or cannot open file : " + filename;
-      }
-      return TINYVDBIO_ERROR_INVALID_FILE;
-    }
-
-    // TODO(syoyo): Use mmap
-    ifs.seekg(0, ifs.end);
-    size_t sz = static_cast<size_t>(ifs.tellg());
-    if (int64_t(sz) < 0) {
-      // Looks reading directory, not a file.
-      if (err) {
-        (*err) += "Looks like filename is a directory : \"" + filename + "\"\n";
-      }
-      return TINYVDBIO_ERROR_INVALID_FILE;
-    }
-
-    if (sz < 16) {
-      // ???
-      if (err) {
-        (*err) +=
-            "File size too short. Looks like this file is not a VDB : \"" +
-            filename + "\"\n";
-      }
-      return TINYVDBIO_ERROR_INVALID_FILE;
-    }
-
-    data.resize(sz);
-
-    ifs.seekg(0, ifs.beg);
-    ifs.read(reinterpret_cast<char *>(&data.at(0)),
-             static_cast<std::streamsize>(sz));
+  std::vector<uint8_t> data = read_file_binary(filename, err);
+  if (data.empty()) {
+    return TINYVDBIO_ERROR_INVALID_FILE;
   }
 
   VDBStatus status = ParseVDBHeader(data.data(), data.size(), header, err);
@@ -3340,42 +3284,9 @@ VDBStatus ReadGridDescriptors(const std::string &filename,
                               const VDBHeader &header,
                               std::map<std::string, GridDescriptor> *gd_map,
                               std::string *err) {
-  std::vector<uint8_t> data;
-  {
-    std::ifstream ifs(filename.c_str(), std::ifstream::binary);
-    if (!ifs) {
-      if (err) {
-        (*err) = "File not found or cannot open file : " + filename;
-      }
-      return TINYVDBIO_ERROR_INVALID_FILE;
-    }
-
-    // TODO(syoyo): Use mmap
-    ifs.seekg(0, ifs.end);
-    size_t sz = static_cast<size_t>(ifs.tellg());
-    if (int64_t(sz) < 0) {
-      // Looks reading directory, not a file.
-      if (err) {
-        (*err) += "Looks like filename is a directory : \"" + filename + "\"\n";
-      }
-      return TINYVDBIO_ERROR_INVALID_FILE;
-    }
-
-    if (sz < 16) {
-      // ???
-      if (err) {
-        (*err) +=
-            "File size too short. Looks like this file is not a VDB : \"" +
-            filename + "\"\n";
-      }
-      return TINYVDBIO_ERROR_INVALID_FILE;
-    }
-
-    data.resize(sz);
-
-    ifs.seekg(0, ifs.beg);
-    ifs.read(reinterpret_cast<char *>(&data.at(0)),
-             static_cast<std::streamsize>(sz));
+  std::vector<uint8_t> data = read_file_binary(filename, err);
+  if (data.empty()) {
+    return TINYVDBIO_ERROR_INVALID_FILE;
   }
 
   VDBStatus status =
@@ -3416,42 +3327,9 @@ VDBStatus ReadGridDescriptors(const uint8_t *data, const size_t data_len,
 VDBStatus ReadGrids(const std::string &filename, const VDBHeader &header,
                     const std::map<std::string, GridDescriptor> &gd_map,
                     std::string *warn, std::string *err) {
-  std::vector<uint8_t> data;
-  {
-    std::ifstream ifs(filename.c_str(), std::ifstream::binary);
-    if (!ifs) {
-      if (err) {
-        (*err) = "File not found or cannot open file : " + filename;
-      }
-      return TINYVDBIO_ERROR_INVALID_FILE;
-    }
-
-    // TODO(syoyo): Use mmap
-    ifs.seekg(0, ifs.end);
-    size_t sz = static_cast<size_t>(ifs.tellg());
-    if (int64_t(sz) < 0) {
-      // Looks reading directory, not a file.
-      if (err) {
-        (*err) += "Looks like filename is a directory : \"" + filename + "\"\n";
-      }
-      return TINYVDBIO_ERROR_INVALID_FILE;
-    }
-
-    if (sz < 16) {
-      // ???
-      if (err) {
-        (*err) +=
-            "File size too short. Looks like this file is not a VDB : \"" +
-            filename + "\"\n";
-      }
-      return TINYVDBIO_ERROR_INVALID_FILE;
-    }
-
-    data.resize(sz);
-
-    ifs.seekg(0, ifs.beg);
-    ifs.read(reinterpret_cast<char *>(&data.at(0)),
-             static_cast<std::streamsize>(sz));
+  std::vector<uint8_t> data = read_file_binary(filename, err);
+  if (data.empty()) {
+    return TINYVDBIO_ERROR_INVALID_FILE;
   }
 
   VDBStatus status =
