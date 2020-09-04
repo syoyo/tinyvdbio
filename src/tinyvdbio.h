@@ -1424,6 +1424,25 @@ extern "C" {
 #endif
 #endif
 
+#if defined(_WIN32)
+
+
+// for MultiByteToWideChar and other UTF8 things.
+#if defined(__MINGW32__)
+#include <windows.h>
+#else
+#include <Windows.h>
+#endif
+
+#if defined(__GLIBCXX__)  // mingw
+
+#include <fcntl.h>  // _O_RDONLY
+#include <ext/stdio_filebuf.h>  // fstream (all sorts of IO stuff) + stdio_filebuf (=streambuf)
+
+#endif
+
+#endif
+
 namespace tinyvdb {
 
 
@@ -1434,10 +1453,10 @@ namespace {
 
 static inline std::wstring utf8_to_wchar(const std::string &str) {
   int wstr_size =
-      MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), NULL, 0);
-  std::wstring wstr(wstr_size, 0);
-  MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), &wstr[0],
-                      (int)wstr.size());
+      MultiByteToWideChar(CP_UTF8, 0, str.data(), int(str.size()), nullptr, 0);
+  std::wstring wstr(size_t(wstr_size), 0);
+  MultiByteToWideChar(CP_UTF8, 0, str.data(), int(str.size()), &wstr[0],
+                      int(wstr.size()));
   return wstr;
 }
 
@@ -1449,11 +1468,23 @@ std::vector<uint8_t> read_file_binary(const std::string &filename,std::string *e
   std::vector<uint8_t> buf;
 
 #if defined(_WIN32)
-  // Support UTF-8 filenames
 
-  std::wifstream ifs(utf8_to_wchar(filename), std::wifstream::binary);
+#if defined(__GLIBCXX__) // mingw gcc
+  // Assume system have native UTF-8 suport
+  int file_descriptor =
+      _wopen(utf8_to_wchar(filename).c_str(), _O_RDONLY | _O_BINARY);
+  __gnu_cxx::stdio_filebuf<char> wfile_buf(file_descriptor, std::ios_base::in);
+  std::istream f(&wfile_buf);
 
+#elif defined(_MSC_VER) // MSC
+  // MSVC extension accepts std::wstring for input filename
+  std::ifstream ifs(utf8_to_wchar(filename), std::ifstream::binary);
 #else
+  // TODO(syoyo): Support UTF-8
+  std::ifstream ifs(filename, std::ifstream::binary);
+#endif
+
+#else // !WIN32
 
   // Assume system have native UTF-8 suport
   std::ifstream ifs(filename, std::ifstream::binary);
