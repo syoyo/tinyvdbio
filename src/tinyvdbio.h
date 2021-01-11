@@ -31,6 +31,7 @@
 #ifndef TINY_VDB_IO_H_
 #define TINY_VDB_IO_H_
 
+#include <array>
 #include <bitset>
 #include <cassert>
 #include <cstring>
@@ -1529,7 +1530,8 @@ std::vector<uint8_t> read_file_binary(const std::string &filename,std::string *e
 
 } // namespace local
 
-std::ostream &operator<<(std::ostream &os, const Boundsi &bound) {
+template<typename T>
+std::ostream &operator<<(std::ostream &os, const Bounds<T> &bound) {
   os << "Boundsi bmin(" << bound.bmin.x << ", " << bound.bmin.y << ", "
      << bound.bmin.z << "), bmax(" << bound.bmax.x << ", " << bound.bmax.y
      << ", " << bound.bmax.z << ")";
