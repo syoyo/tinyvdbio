@@ -1,6 +1,6 @@
 //////////////////////////////////////////////////////////////////////////
 //
-// Copyright (c) 2018-2020 Syoyo Fujita
+// Copyright (c) 2018-2021 Syoyo Fujita
 // Copyright (c) 2012-2018 DreamWorks Animation LLC
 //
 // All rights reserved. This software is distributed under the
@@ -52,28 +52,32 @@
 namespace tinyvdb {
 
 // For voxel coordinate.
-struct Vec3i {
-  int x;
-  int y;
-  int z;
+template<typename T>
+struct Vec3 {
+  T x;
+  T y;
+  T z;
 };
 
-class Boundsi {
- public:
-  Boundsi() {
-    bmin.x = std::numeric_limits<int>::max();
-    bmin.y = std::numeric_limits<int>::max();
-    bmin.z = std::numeric_limits<int>::max();
+using Vec3i = Vec3<int>;
 
-    bmax.x = -std::numeric_limits<int>::max();
-    bmax.y = -std::numeric_limits<int>::max();
-    bmax.z = -std::numeric_limits<int>::max();
+template<typename T>
+class Bounds {
+ public:
+  Bounds() {
+    bmin.x = std::numeric_limits<T>::max();
+    bmin.y = std::numeric_limits<T>::max();
+    bmin.z = std::numeric_limits<T>::max();
+
+    bmax.x = -std::numeric_limits<T>::max();
+    bmax.y = -std::numeric_limits<T>::max();
+    bmax.z = -std::numeric_limits<T>::max();
   }
 
   ///
   /// Returns true if given coordinate is within this bound
   ///
-  bool Contains(const Vec3i &v) {
+  bool Contains(const Vec3<T> &v) {
     if ((bmin.x <= v.x) && (v.x <= bmax.x) && (bmin.y <= v.y) &&
         (v.y <= bmax.y) && (bmin.z <= v.z) && (v.z <= bmax.z)) {
       return true;
@@ -85,7 +89,7 @@ class Boundsi {
   ///
   /// Returns true if given bounding box overlaps with this bound.
   ///
-  bool Overlaps(const Boundsi &b) {
+  bool Overlaps(const Bounds<T> &b) {
     if (Contains(b.bmin) || Contains(b.bmax)) {
       return true;
     }
@@ -95,8 +99,8 @@ class Boundsi {
   ///
   /// Compute union of two bounds.
   ///
-  static Boundsi Union(const Boundsi &a, const Boundsi &b) {
-    Boundsi bound;
+  static Bounds Union(const Bounds &a, const Bounds &b) {
+    Bounds bound;
 
     bound.bmin.x = std::min(a.bmin.x, b.bmin.x);
     bound.bmin.y = std::min(a.bmin.y, b.bmin.y);
@@ -109,11 +113,14 @@ class Boundsi {
     return bound;
   }
 
-  friend std::ostream &operator<<(std::ostream &os, const Boundsi &bound);
+  template<typename U>
+  friend std::ostream &operator<<(std::ostream &os, const Bounds<U> &bound);
 
-  Vec3i bmin;
-  Vec3i bmax;
+  Vec3<T> bmin;
+  Vec3<T> bmax;
 };
+
+using Boundsi = Bounds<int>;
 
 // --- vvv --------------------------------------------------
 
@@ -798,22 +805,6 @@ class NodeMask {
 #endif
 };  // NodeMask
 
-#if 0
-template <std::size_t N>
-class BitMask {
- public:
-  BitMask() {}
-  ~BitMask() {}
-
-  ///
-  /// Loads bit mask value from stream reader.
-  ///
-  bool load(StreamReader *sr);
-
- private:
-  std::bitset<N> mask_;
-};
-#endif
 
 class GridDescriptor {
  public:
@@ -1125,9 +1116,9 @@ class InternalOrLeafNode : public Node {
 
   InternalOrLeafNode(const GridLayoutInfo &grid_layout_info)
       : Node(grid_layout_info) {
-    origin_[0] = 0.0f;
-    origin_[1] = 0.0f;
-    origin_[2] = 0.0f;
+    origin_[0] = 0;
+    origin_[1] = 0;
+    origin_[2] = 0;
     // node_values_.resize(child_mask_.size());
 
     num_voxels_ = 0;
@@ -1201,7 +1192,7 @@ class InternalOrLeafNode : public Node {
   std::vector<InternalOrLeafNode> child_nodes_;
 
   NodeMask child_mask_;
-  int origin_[3];
+  std::array<int, 3> origin_;
 
   std::vector<ValueType> node_values_;
 
@@ -1234,6 +1225,10 @@ class RootNode : public Node {
 
   const std::vector<Boundsi> &GetChildBounds() const { return child_bounds_; }
 
+  std::string GetError() const {
+    return error_;
+  }
+
  private:
   // store voxel bounds of child node in global coordinate.
   std::vector<Boundsi> child_bounds_;
@@ -1242,21 +1237,24 @@ class RootNode : public Node {
   Value background_;  // Background(region of un-interested area) value
   uint32_t num_tiles_;
   uint32_t num_children_;
+
+  std::string error_;
 };
 
 ///
 /// Simple Voxel node.
 /// (integer grid)
 ///
+template<typename T>
 struct VoxelNode {
   // local bbox
   // must be dividable by each element of `num_divs` for intermediate node.
-  uint32_t bmin[3];
-  uint32_t bmax[3];
+  std::array<uint32_t, 3> bmin;
+  std::array<uint32_t, 3> bmax;
 
   bool is_leaf;
 
-  uint32_t num_divs[3];  // The number of voxel divisions
+  std::array<uint32_t, 3> num_divs;  // The number of voxel divisions
 
   //
   // intermediate(branch)
@@ -1274,7 +1272,7 @@ struct VoxelNode {
 
   // TODO(syoyo): Support various voxel data type.
   uint32_t num_channels;
-  std::vector<float>
+  std::vector<T>
       voxels;  // len = num_divs[0] * num_divs[1] * num_divs[2] * num_channels
 };
 
@@ -1309,12 +1307,12 @@ class VoxelTree {
 
   bool valid_;
 
-  double bmin_[3];   // bounding min of root voxel node(in world coordinate).
-  double bmax_[3];   // bounding max of root voxel node(in world coordinate).
-  double pitch_[3];  // voxel pitch at leaf level. Assume all voxel has same
+  std::array<double, 3> bmin_;   // bounding min of root voxel node(in world coordinate).
+  std::array<double, 3> bmax_;   // bounding max of root voxel node(in world coordinate).
+  std::array<double, 3> pitch_;  // voxel pitch at leaf level. Assume all voxel has same
                      // pitch size.
 
-  std::vector<VoxelNode> nodes_;  // [0] = root node
+  std::vector<VoxelNode<float>> nodes_;  // [0] = root node
 };
 
 #ifdef __clang__
@@ -2045,28 +2043,39 @@ class StreamReader {
   uint64_t idx_;
 };
 
-static Value ReadValue(StreamReader *sr, const ValueType type) {
+static bool ReadValue(StreamReader *sr, const ValueType type, Value *out) {
   if (type == VALUE_TYPE_NULL) {
-    return Value();
+    (*out) = Value();
   } else if (type == VALUE_TYPE_BOOL) {
     char value;
-    sr->read1(&value);
-    return Value(value);
+    if (!sr->read1(&value)) {
+      return false;
+    }
+    (*out) = Value(value);
   } else if (type == VALUE_TYPE_FLOAT) {
     float value;
-    sr->read_float(&value);
-    return Value(value);
+    if (!sr->read_float(&value)) {
+      return false;
+    }
+    (*out) = Value(value);
   } else if (type == VALUE_TYPE_INT) {
     int value;
-    sr->read4(&value);
-    return Value(value);
+    if (!sr->read4(&value)) {
+      return false;
+    }
+
+    (*out) = Value(value);
   } else if (type == VALUE_TYPE_DOUBLE) {
     double value;
-    sr->read_double(&value);
-    return Value(value);
+    if (!sr->read_double(&value)) {
+      return false;
+    }
+    (*out) = Value(value);
+  } else {
+    return false;
   }
-  // ???
-  return Value();
+
+  return true;
 }
 
 struct DeserializeParams {
@@ -2513,16 +2522,22 @@ bool RootNode::ReadTopology(StreamReader *sr, int level,
   std::cout << "Root background loc " << sr->tell() << std::endl;
 
   // Read background value;
-  background_ =
-      ReadValue(sr, grid_layout_info_.GetNodeInfo(level).value_type());
+  if (!ReadValue(sr, grid_layout_info_.GetNodeInfo(level).value_type(), &background_)) {
+    return false;
+  }
 
   std::cout << "background : " << background_ << ", size = "
             << GetValueTypeSize(
                    grid_layout_info_.GetNodeInfo(level).value_type())
             << std::endl;
 
-  sr->read4(&num_tiles_);
-  sr->read4(&num_children_);
+  if (!sr->read4(&num_tiles_)) {
+    return false;
+  }
+
+  if (!sr->read4(&num_children_)) {
+    return false;
+  }
 
   if ((num_tiles_ == 0) && (num_children_ == 0)) {
     return false;
@@ -2540,7 +2555,10 @@ bool RootNode::ReadTopology(StreamReader *sr, int level,
     sr->read4(&vec[0]);
     sr->read4(&vec[1]);
     sr->read4(&vec[2]);
-    value = ReadValue(sr, grid_layout_info_.GetNodeInfo(level).value_type());
+    if (!ReadValue(sr, grid_layout_info_.GetNodeInfo(level).value_type(), &value)) {
+      return false;
+    }
+
     sr->read_bool(&active);
 
     std::cout << "[" << n << "] vec = (" << vec[0] << ", " << vec[1] << ", "
@@ -3507,7 +3525,7 @@ bool VoxelTree::Build(const RootNode &root, std::string *err) {
   }
 
   // root node
-  VoxelNode node;
+  VoxelNode<float> node;
 
   nodes_.push_back(node);
 
