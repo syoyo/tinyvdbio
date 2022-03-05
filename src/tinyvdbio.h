@@ -1,6 +1,6 @@
 //////////////////////////////////////////////////////////////////////////
 //
-// Copyright (c) 2018-2021 Syoyo Fujita
+// Copyright (c) 2018-2022 Syoyo Fujita
 // Copyright (c) 2012-2018 DreamWorks Animation LLC
 //
 // All rights reserved. This software is distributed under the
@@ -49,6 +49,8 @@
 #define NOMINMAX
 #endif
 #endif
+
+#include "nonstd/variant.hpp"
 
 namespace tinyvdb {
 
@@ -360,6 +362,31 @@ class dynamic_bitset {
 #pragma clang diagnostic ignored "-Wpadded"
 #pragma clang diagnostic ignored "-Wc++11-long-long"
 #endif
+
+struct RootNode;
+struct IntermediateNode;
+struct LeafNode;
+
+template<typename dtype>
+struct TypeTrait;
+
+template<>
+struct TypeTrait<RootNode> {
+  static constexpr auto type_name = "RootNode";
+  static constexpr uint32_t type_id = 0;
+};
+
+template<>
+struct TypeTrait<IntermediateNode> {
+  static constexpr auto type_name = "IntermediateNode";
+  static constexpr uint32_t type_id = 1;
+};
+
+template<>
+struct TypeTrait<LeafNode> {
+  static constexpr auto type_name = "LeafNode";
+  static constexpr uint32_t type_id = 2;
+};
 
 typedef struct {
   uint32_t file_version;
@@ -843,10 +870,10 @@ class GridDescriptor {
   std::string instance_parent_name_;
   std::string grid_type_;
 
-  bool save_float_as_half_;  // use fp16?
-  uint64_t grid_byte_offset_;
-  uint64_t block_byte_offset_;
-  uint64_t end_byte_offset_;
+  bool save_float_as_half_{false};  // use fp16?
+  uint64_t grid_byte_offset_{0};
+  uint64_t block_byte_offset_{0};
+  uint64_t end_byte_offset_{0};
 };
 
 typedef enum {
@@ -1008,6 +1035,7 @@ class TreeDesc {
  private:
   TreeDesc *child_tree_desc_;
 };
+
 
 class NodeInfo {
  public:

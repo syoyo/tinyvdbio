@@ -62,6 +62,10 @@ Recent OpenVDB file(223~) are usually compressed using BLOSC, so it is highly re
 T.B.W.
 ```
 
+## openvdb2nanovdb
+
+TODO: Convert OpenVDB data to NanoVDB usint TinyVDBIO
+
 ### Blosc
 
 #### Setup
@@ -121,10 +125,12 @@ TinyVDBIO is released under the [Mozilla Public License Version 2.0](https://www
 ### Third party licenses
 
 * imgui : MIT license
+* variant-lite : Boost license
 * stb series : Public domain
 * glfw3 : zlib license
 * glad : ???
 * clipp: MIT license.
+* nanovdb : MPL 2.0 license.
 
 ### Notes on patent
 
