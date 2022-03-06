@@ -43,14 +43,14 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <functional>
+#include <unordered_map>
 
 #if defined(_MSC_VER) || defined(__MINGW32__)
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #endif
-
-#include "nonstd/variant.hpp"
 
 namespace tinyvdb {
 
@@ -63,6 +63,22 @@ struct Vec3 {
 };
 
 using Vec3i = Vec3<int>;
+using Vec3ui = Vec3<uint32_t>;
+
+// Simple voxel hash for small voxel indexing(less than < 1024^3)
+template<int N = 1024>
+struct VoxelIndexHash
+{
+  static uint64_t hash(const Vec3ui v) {
+    return v.z * N * N + v.y * N + v.x;
+  }
+
+  static uint64_t hash(const uint32_t x, const uint32_t y, const uint32_t z) {
+    return z * N * N + y * N + x;
+  }
+
+};
+
 
 template<typename T>
 class Bounds {
@@ -363,9 +379,10 @@ class dynamic_bitset {
 #pragma clang diagnostic ignored "-Wc++11-long-long"
 #endif
 
-struct RootNode;
-struct IntermediateNode;
-struct LeafNode;
+// Forward
+class RootNode;
+class IntermediateNode;
+class LeafNode;
 
 template<typename dtype>
 struct TypeTrait;
@@ -3567,6 +3584,12 @@ bool VoxelTree::Build(const RootNode &root, std::string *err) {
   }
 
   std::cout << root_bounds << std::endl;
+
+  // Test ---
+  {
+    uint64_t v = VoxelIndexHash<>::hash(1, 2, 3);
+    std::cout << v << "\n";
+  }
 
   valid_ = true;
   return true;
