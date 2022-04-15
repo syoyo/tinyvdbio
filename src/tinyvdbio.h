@@ -50,8 +50,6 @@
 #endif
 #endif
 
-#include "nonstd/variant.hpp"
-
 namespace tinyvdb {
 
 // For voxel coordinate.
@@ -363,9 +361,9 @@ class dynamic_bitset {
 #pragma clang diagnostic ignored "-Wc++11-long-long"
 #endif
 
-struct RootNode;
-struct IntermediateNode;
-struct LeafNode;
+class RootNode;
+class IntermediateNode;
+class LeafNode;
 
 template<typename dtype>
 struct TypeTrait;
@@ -1089,6 +1087,7 @@ class GridLayoutInfo {
   }
 
   std::vector<NodeInfo> node_infos_;
+
 };
 
 class InternalOrLeafNode;
@@ -1199,10 +1198,10 @@ class InternalOrLeafNode : public Node {
   /// @param[in] level Depth of this node(0: root, 1: first intermediate, ...)
   ///
   bool ReadTopology(StreamReader *sr, int level, const DeserializeParams &parms,
-                    std::string *warn, std::string *err);
+                    std::string *warn, std::string *err) override;
 
   bool ReadBuffer(StreamReader *sr, int level, const DeserializeParams &params,
-                  std::string *warn, std::string *err);
+                  std::string *warn, std::string *err) override;
 
   const std::vector<InternalOrLeafNode> &GetChildNodes() const {
     return child_nodes_;
@@ -1235,16 +1234,16 @@ class RootNode : public Node {
  public:
   RootNode(const GridLayoutInfo &layout_info)
       : Node(layout_info), num_tiles_(0), num_children_(0) {}
-  ~RootNode() {}
+  ~RootNode() override {}
 
   /// Deep copy function
   RootNode &Copy(const RootNode &rhs);
 
   bool ReadTopology(StreamReader *sr, int level, const DeserializeParams &parms,
-                    std::string *warn, std::string *err);
+                    std::string *warn, std::string *err) override;
 
   bool ReadBuffer(StreamReader *sr, int level, const DeserializeParams &params,
-                  std::string *warn, std::string *err);
+                  std::string *warn, std::string *err) override;
 
   const std::vector<InternalOrLeafNode> &GetChildNodes() const {
     return child_nodes_;
@@ -2112,7 +2111,7 @@ struct DeserializeParams {
   uint32_t file_version;
   uint32_t compression_flags;
   bool half_precision;
-  char __pad__[7];
+  char _byte_pad_[7];
   Value background;
 };
 
