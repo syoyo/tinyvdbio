@@ -28,8 +28,9 @@ int main(int argc, char **argv)
 
   if (status != tinyvdb::TINYVDBIO_SUCCESS) {
     if (!err.empty()) {
-      std::cerr << err << std::endl;
+      std::cerr << "error: " << err << std::endl;
     }
+    std::cerr << "Failed to parse VDB header. status = " << status << "\n";
     return EXIT_FAILURE;
   }
 
@@ -39,8 +40,9 @@ int main(int argc, char **argv)
   status = tinyvdb::ReadGridDescriptors(argv[1], header, &gd_map, &err);
   if (status != tinyvdb::TINYVDBIO_SUCCESS) {
     if (!err.empty()) {
-      std::cerr << err << std::endl;
+      std::cerr << "error: " << err << std::endl;
     }
+    std::cerr << "Failed to read grid descriptors. status = " << status << "\n";
     return EXIT_FAILURE;
   }
 
@@ -49,12 +51,13 @@ int main(int argc, char **argv)
   // 3. Read Grids
   status = tinyvdb::ReadGrids(argv[1], header, gd_map, &warn, &err);
   if (!warn.empty()) {
-    std::cout << warn << std::endl;
+    std::cout << "warning: " << warn << std::endl;
   }
   if (status != tinyvdb::TINYVDBIO_SUCCESS) {
     if (!err.empty()) {
-      std::cerr << err << std::endl;
+      std::cerr << "error: " << err << std::endl;
     }
+    std::cerr << "Failed to read grids. status = " << tinyvdb::GetStatusString(status) << "\n";
     return EXIT_FAILURE;
   }
 

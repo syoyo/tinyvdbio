@@ -125,7 +125,6 @@ TinyVDBIO is released under the [Mozilla Public License Version 2.0](https://www
 ### Third party licenses
 
 * imgui : MIT license
-* variant-lite : Boost license
 * stb series : Public domain
 * glfw3 : zlib license
 * glad : ???

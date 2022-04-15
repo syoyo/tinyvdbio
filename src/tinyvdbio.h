@@ -43,6 +43,8 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <functional>
+#include <unordered_map>
 
 #if defined(_MSC_VER) || defined(__MINGW32__)
 #ifndef NOMINMAX
@@ -61,6 +63,22 @@ struct Vec3 {
 };
 
 using Vec3i = Vec3<int>;
+using Vec3ui = Vec3<uint32_t>;
+
+// Simple voxel hash for small voxel indexing(less than < 1024^3)
+template<int N = 1024>
+struct VoxelIndexHash
+{
+  static uint64_t hash(const Vec3ui v) {
+    return v.z * N * N + v.y * N + v.x;
+  }
+
+  static uint64_t hash(const uint32_t x, const uint32_t y, const uint32_t z) {
+    return z * N * N + y * N + x;
+  }
+
+};
+
 
 template<typename T>
 class Bounds {
@@ -361,6 +379,7 @@ class dynamic_bitset {
 #pragma clang diagnostic ignored "-Wc++11-long-long"
 #endif
 
+// Forward
 class RootNode;
 class IntermediateNode;
 class LeafNode;
@@ -408,6 +427,8 @@ typedef enum {
   TINYVDBIO_ERROR_INVALID_ARGUMENT,
   TINYVDBIO_ERROR_UNIMPLEMENTED
 } VDBStatus;
+
+std::string GetStatusString(VDBStatus status);
 
 // forward decl.
 class StreamReader;
@@ -2537,10 +2558,11 @@ static bool ReadMaskValues(StreamReader *sr, const uint32_t compression_flags,
 }
 
 bool NodeMask::load(StreamReader *sr) {
-  // std::cout << "DBG: mWords size = " << this->size() << std::endl;
-  // std::cout << "DBG: mWords.size = " << mWords.size() << std::endl;
 
   bool ret = sr->read(this->memUsage(), this->memUsage(), bits.data());
+  if (!ret) {
+    std::cout << "DBG: mWords size = " << this->memUsage() << ", ret = " << ret << std::endl;
+  }
 
   return ret;
 }
@@ -3567,8 +3589,31 @@ bool VoxelTree::Build(const RootNode &root, std::string *err) {
 
   std::cout << root_bounds << std::endl;
 
+  // Test ---
+  {
+    uint64_t v = VoxelIndexHash<>::hash(1, 2, 3);
+    std::cout << v << "\n";
+  }
+
   valid_ = true;
   return true;
+}
+
+std::string GetStatusString(VDBStatus status) {
+  switch (status) {
+    case TINYVDBIO_SUCCESS:
+      return "SUCCESS";
+    case TINYVDBIO_ERROR_INVALID_FILE:
+      return "ERROR_INVALID_FILE";
+    case TINYVDBIO_ERROR_INVALID_HEADER:
+      return "ERROR_INVALID_HEADER";
+    case TINYVDBIO_ERROR_INVALID_DATA:
+      return "ERROR_INVALID_DATA";
+    case TINYVDBIO_ERROR_INVALID_ARGUMENT:
+      return "ERROR_INVALID_ARGUMENT";
+    case TINYVDBIO_ERROR_UNIMPLEMENTED:
+      return "ERROR_INVALID_UNIMPLEMENTED";
+  }
 }
 
 }  // namespace tinyvdb
