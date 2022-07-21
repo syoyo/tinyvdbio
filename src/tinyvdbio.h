@@ -31,20 +31,20 @@
 #ifndef TINY_VDB_IO_H_
 #define TINY_VDB_IO_H_
 
+#include <algorithm>
 #include <array>
 #include <bitset>
 #include <cassert>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <map>
 #include <sstream>
 #include <string>
-#include <vector>
-#include <algorithm>
-#include <functional>
 #include <unordered_map>
+#include <vector>
 
 #if defined(_MSC_VER) || defined(__MINGW32__)
 #ifndef NOMINMAX
@@ -55,7 +55,7 @@
 namespace tinyvdb {
 
 // For voxel coordinate.
-template<typename T>
+template <typename T>
 struct Vec3 {
   T x;
   T y;
@@ -66,21 +66,16 @@ using Vec3i = Vec3<int>;
 using Vec3ui = Vec3<uint32_t>;
 
 // Simple voxel hash for small voxel indexing(less than < 1024^3)
-template<int N = 1024>
-struct VoxelIndexHash
-{
-  static uint64_t hash(const Vec3ui v) {
-    return v.z * N * N + v.y * N + v.x;
-  }
+template <int N = 1024>
+struct VoxelIndexHash {
+  static uint64_t hash(const Vec3ui v) { return v.z * N * N + v.y * N + v.x; }
 
   static uint64_t hash(const uint32_t x, const uint32_t y, const uint32_t z) {
     return z * N * N + y * N + x;
   }
-
 };
 
-
-template<typename T>
+template <typename T>
 class Bounds {
  public:
   Bounds() {
@@ -132,7 +127,7 @@ class Bounds {
     return bound;
   }
 
-  template<typename U>
+  template <typename U>
   friend std::ostream &operator<<(std::ostream &os, const Bounds<U> &bound);
 
   Vec3<T> bmin;
@@ -142,6 +137,7 @@ class Bounds {
 using Boundsi = Bounds<int>;
 
 // --- vvv --------------------------------------------------
+
 
 /*
 The MIT License (MIT)
@@ -384,26 +380,40 @@ class RootNode;
 class IntermediateNode;
 class LeafNode;
 
-template<typename dtype>
+enum class TypeId {
+  VOID,
+  ROOT_NODE,
+  INTERMEDIATE_NODE,
+  LEAF_NODE,
+};
+
+template <typename dtype>
 struct TypeTrait;
 
-template<>
+template <>
+struct TypeTrait<void> {
+  static constexpr auto type_name = "void";
+  static constexpr TypeId type_id = TypeId::VOID;
+};
+
+template <>
 struct TypeTrait<RootNode> {
   static constexpr auto type_name = "RootNode";
-  static constexpr uint32_t type_id = 0;
+  static constexpr TypeId type_id = TypeId::ROOT_NODE;
 };
 
-template<>
+template <>
 struct TypeTrait<IntermediateNode> {
   static constexpr auto type_name = "IntermediateNode";
-  static constexpr uint32_t type_id = 1;
+  static constexpr TypeId type_id = TypeId::INTERMEDIATE_NODE;
 };
 
-template<>
+template <>
 struct TypeTrait<LeafNode> {
   static constexpr auto type_name = "LeafNode";
-  static constexpr uint32_t type_id = 2;
+  static constexpr TypeId type_id = TypeId::LEAF_NODE;
 };
+
 
 typedef struct {
   uint32_t file_version;
@@ -429,6 +439,330 @@ typedef enum {
 } VDBStatus;
 
 std::string GetStatusString(VDBStatus status);
+
+// --- variant -------------------------------------------------------
+//
+// Based on
+// https://gist.github.com/calebh/fd00632d9c616d4b0c14e7c2865f3085
+//
+// Modification by Syoyo Fujita.
+// - Use tinyusdz::value::TypeTrait for type_id
+// - Disable exception
+// - Implement set and get, get_if
+//
+
+/*
+This is free and unencumbered software released into the public domain.
+Anyone is free to copy, modify, publish, use, compile, sell, or
+distribute this software, either in source code form or as a compiled
+binary, for any purpose, commercial or non-commercial, and by any
+means.
+In jurisdictions that recognize copyright laws, the author or authors
+of this software dedicate any and all copyright interest in the
+software to the public domain. We make this dedication for the benefit
+of the public at large and to the detriment of our heirs and
+successors. We intend this dedication to be an overt act of
+relinquishment in perpetuity of all present and future rights to this
+software under copyright law.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+For more information, please refer to <http://unlicense.org/>
+*/
+
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Weverything"
+#endif
+
+//#include "nonstd/optional.hpp" // for optional<T>& get()
+
+// Equivalent to std::aligned_storage
+template <unsigned int Len, unsigned int Align>
+struct aligned_storage {
+  struct type {
+    alignas(Align) unsigned char data[Len];
+  };
+};
+
+template <unsigned int arg1, unsigned int... others>
+struct static_max;
+
+template <unsigned int arg>
+struct static_max<arg> {
+  static const unsigned int value = arg;
+};
+
+template <unsigned int arg1, unsigned int arg2, unsigned int... others>
+struct static_max<arg1, arg2, others...> {
+  static const unsigned int value = arg1 >= arg2
+                                        ? static_max<arg1, others...>::value
+                                        : static_max<arg2, others...>::value;
+};
+
+template <class T>
+struct remove_reference {
+  typedef T type;
+};
+template <class T>
+struct remove_reference<T&> {
+  typedef T type;
+};
+template <class T>
+struct remove_reference<T&&> {
+  typedef T type;
+};
+
+template <typename... Ts>
+struct variant_helper_rec;
+
+template <typename F, typename... Ts>
+struct variant_helper_rec<F, Ts...> {
+  inline static void destroy(uint32_t id, void* data) {
+    if (TypeTrait<F>::type_id == id) {
+      reinterpret_cast<F*>(data)->~F();
+    } else {
+      variant_helper_rec<Ts...>::destroy(id, data);
+    }
+  }
+
+  inline static void move(uint32_t id, void* from, void* to) {
+    if (TypeTrait<F>::type_id == id) {
+      // This static_cast and use of remove_reference is equivalent to the use
+      // of std::move
+      new (to) F(static_cast<typename remove_reference<F>::type&&>(
+          *reinterpret_cast<F*>(from)));
+    } else {
+      variant_helper_rec<Ts...>::move(id, from, to);
+    }
+  }
+
+  inline static void copy(uint32_t id, const void* from, void* to) {
+    if (TypeTrait<F>::type_id == id) {
+      new (to) F(*reinterpret_cast<const F*>(from));
+    } else {
+      variant_helper_rec<Ts...>::copy(id, from, to);
+    }
+  }
+};
+
+template <>
+struct variant_helper_rec<> {
+  inline static void destroy(uint32_t id, void* data) {}
+  inline static void move(uint32_t old_t, void* from, void* to) {}
+  inline static void copy(uint32_t old_t, const void* from, void* to) {}
+};
+
+template <typename... Ts>
+struct variant_helper {
+  inline static void destroy(uint32_t id, void* data) {
+    variant_helper_rec<Ts...>::destroy(id, data);
+  }
+
+  inline static void move(uint32_t id, void* from, void* to) {
+    variant_helper_rec<Ts...>::move(id, from, to);
+  }
+
+  inline static void copy(uint32_t id, const void* old_v, void* new_v) {
+    variant_helper_rec<Ts...>::copy(id, old_v, new_v);
+  }
+};
+
+template <>
+struct variant_helper<> {
+  inline static void destroy(uint32_t id, void* data) {}
+  inline static void move(uint32_t old_t, void* old_v, void* new_v) {}
+  inline static void copy(uint32_t old_t, const void* old_v, void* new_v) {}
+};
+
+template <typename F>
+struct variant_helper_static;
+
+template <typename F>
+struct variant_helper_static {
+  inline static void move(void* from, void* to) {
+    new (to) F(static_cast<typename remove_reference<F>::type&&>(
+        *reinterpret_cast<F*>(from)));
+  }
+
+  inline static void copy(const void* from, void* to) {
+    new (to) F(*reinterpret_cast<const F*>(from));
+  }
+};
+
+#if 0  // not used
+// Given a uint8_t i, selects the ith type from the list of item types
+template <uint8_t i, typename... Items>
+struct variant_alternative;
+
+template <typename HeadItem, typename... TailItems>
+struct variant_alternative<0, HeadItem, TailItems...> {
+  using type = HeadItem;
+};
+
+template <uint8_t i, typename HeadItem, typename... TailItems>
+struct variant_alternative<i, HeadItem, TailItems...> {
+  using type = typename variant_alternative<i - 1, TailItems...>::type;
+};
+#endif
+
+template <uint8_t n, typename... Ts>
+struct variant_get_rec;
+
+template <typename...>
+struct is_one_of {
+  static constexpr bool value = false;
+};
+
+template <typename T, typename S, typename... Ts>
+struct is_one_of<T, S, Ts...> {
+  static constexpr bool value =
+      std::is_same<T, S>::value || is_one_of<T, Ts...>::value;
+};
+
+template <typename... Ts>
+struct variant {
+ private:
+  static const unsigned int data_size = static_max<sizeof(Ts)...>::value;
+  static const unsigned int data_align = static_max<alignof(Ts)...>::value;
+
+  using data_t = typename aligned_storage<data_size, data_align>::type;
+
+  using helper_t = variant_helper<Ts...>;
+
+  // template <uint8_t i>
+  // using alternative = typename variant_alternative<i, Ts...>::type;
+
+  static inline TypeId invalid_type() {
+    return TypeTrait<void>::type_id;
+  }
+
+  TypeId variant_id;
+  data_t data;
+
+  static void *nulldata() {
+    return nullptr;
+  }
+
+ public:
+
+  variant() : variant_id(invalid_type()) {}
+
+
+  variant(const variant<Ts...>& from) : variant_id(from.variant_id) {
+    helper_t::copy(from.variant_id, &from.data, &data);
+  }
+
+  variant(variant<Ts...>&& from) : variant_id(from.variant_id) {
+    helper_t::move(from.variant_id, &from.data, &data);
+  }
+
+  variant<Ts...>& operator=(const variant<Ts...>& rhs) {
+    helper_t::destroy(variant_id, &data);
+    variant_id = rhs.variant_id;
+    helper_t::copy(rhs.variant_id, &rhs.data, &data);
+    return *this;
+  }
+
+  variant<Ts...>& operator=(variant<Ts...>&& rhs) {
+    helper_t::destroy(variant_id, &data);
+    variant_id = rhs.variant_id;
+    helper_t::move(rhs.variant_id, &rhs.data, &data);
+    return *this;
+  }
+
+  template <typename T>
+  bool is() const {
+    return variant_id == TypeTrait<T>::type_id;
+  }
+
+  TypeId type_id() const { return variant_id; }
+
+  // template<typename T, typename... Args>
+  template <typename T, typename... Args,
+            typename =
+                typename std::enable_if<is_one_of<T, Ts...>::value, void>::type>
+  void set(Args&&... args) {
+    helper_t::destroy(variant_id, &data);
+    new (&data) T(std::forward<Args>(args)...);
+    variant_id = TypeTrait<T>::type_id;
+    // variant_helper_static<alternative<i>>::copy(&value, &data);
+  }
+
+  template<typename T>
+  variant(const T &v) {
+    set<T>(v);
+  }
+
+#if 1
+  // allow seg fault.
+  template <typename T, typename... Args,
+            typename =
+                typename std::enable_if<is_one_of<T, Ts...>::value, void>::type>
+  T& cast() {
+    // It is a dynamic_cast-like behaviour
+    if (variant_id == TypeTrait<T>::type_id) {
+      return *reinterpret_cast<T*>(&data);
+    }
+
+    // Will raise null-pointer dereference error.
+    return *reinterpret_cast<T*>(nulldata());
+  }
+#endif
+
+#if 0
+  template <typename T, typename... Args,
+            typename =
+                typename std::enable_if<is_one_of<T, Ts...>::value, void>::type>
+  const nonstd::optional<T> get() {
+    // It is a dynamic_cast-like behaviour
+    if (variant_id == TypeTrait<T>::type_id) {
+      return *reinterpret_cast<T*>(&data);
+    }
+
+    return nonstd::nullopt;
+  }
+
+  template <typename T, typename... Args,
+            typename =
+                typename std::enable_if<is_one_of<T, Ts...>::value, void>::type>
+  const nonstd::optional<T> get() const {
+    // It is a dynamic_cast-like behaviour
+    if (variant_id == TypeTrait<T>::type_id) {
+      return *reinterpret_cast<const T*>(&data);
+    }
+
+    return nonstd::nullopt;
+  }
+#endif
+
+  template <typename T, typename... Args,
+            typename =
+                typename std::enable_if<is_one_of<T, Ts...>::value, void>::type>
+  T* get_if() {
+    // It is a dynamic_cast-like behaviour
+    if (variant_id == TypeTrait<T>::type_id) {
+      return reinterpret_cast<T*>(&data);
+    }
+
+    return nullptr;
+  }
+
+  ~variant() { helper_t::destroy(variant_id, &data); }
+};
+
+struct monostate {};
+
+
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+
+// --------------------------------------------------------------------
 
 // forward decl.
 class StreamReader;
@@ -807,9 +1141,7 @@ class NodeMask {
        << " Bit count=" << BITSIZE << std::endl;
   }
 
-  std::string bitString() const {
-    return bits.to_string();
-  }
+  std::string bitString() const { return bits.to_string(); }
 
 #if 0
   void printBits(std::ostream &os = std::cout, int32_t max_out = 80u) const {
@@ -852,7 +1184,6 @@ class NodeMask {
 #endif
 };  // NodeMask
 
-
 class GridDescriptor {
  public:
   GridDescriptor();
@@ -875,8 +1206,10 @@ class GridDescriptor {
   uint64_t EndByteOffset() const { return end_byte_offset_; }
 
   // "\x1e" = ASCII "record separator"
-  static std::string AddSuffix(const std::string &name, int n, const std::string &seperator = "\x1e");
-  static std::string StripSuffix(const std::string &name, const std::string &separator = "\x1e");
+  static std::string AddSuffix(const std::string &name, int n,
+                               const std::string &seperator = "\x1e");
+  static std::string StripSuffix(const std::string &name,
+                                 const std::string &separator = "\x1e");
 
   ///
   /// Read GridDescriptor from a stream.
@@ -1055,7 +1388,6 @@ class TreeDesc {
   TreeDesc *child_tree_desc_;
 };
 
-
 class NodeInfo {
  public:
   NodeInfo(NodeType node_type, ValueType value_type, int32_t log2dim)
@@ -1108,7 +1440,6 @@ class GridLayoutInfo {
   }
 
   std::vector<NodeInfo> node_infos_;
-
 };
 
 class InternalOrLeafNode;
@@ -1274,9 +1605,7 @@ class RootNode : public Node {
 
   const std::vector<Boundsi> &GetChildBounds() const { return child_bounds_; }
 
-  std::string GetError() const {
-    return error_;
-  }
+  std::string GetError() const { return error_; }
 
  private:
   // store voxel bounds of child node in global coordinate.
@@ -1294,7 +1623,7 @@ class RootNode : public Node {
 /// Simple Voxel node.
 /// (integer grid)
 ///
-template<typename T>
+template <typename T>
 struct VoxelNode {
   // local bbox
   // must be dividable by each element of `num_divs` for intermediate node.
@@ -1347,8 +1676,7 @@ class VoxelTree {
   /// @param[in] req_channels Required channels of voxel data.
   /// @param[out] out Sampled voxel value(length = req_channels)
   ///
-  void Sample(const uint32_t loc[3], const uint8_t req_channels,
-              float *out);
+  void Sample(const uint32_t loc[3], const uint8_t req_channels, float *out);
 
  private:
   // Build tree recursively.
@@ -1356,10 +1684,12 @@ class VoxelTree {
 
   bool valid_;
 
-  std::array<double, 3> bmin_;   // bounding min of root voxel node(in world coordinate).
-  std::array<double, 3> bmax_;   // bounding max of root voxel node(in world coordinate).
-  std::array<double, 3> pitch_;  // voxel pitch at leaf level. Assume all voxel has same
-                     // pitch size.
+  std::array<double, 3>
+      bmin_;  // bounding min of root voxel node(in world coordinate).
+  std::array<double, 3>
+      bmax_;  // bounding max of root voxel node(in world coordinate).
+  std::array<double, 3> pitch_;  // voxel pitch at leaf level. Assume all voxel
+                                 // has same pitch size.
 
   std::vector<VoxelNode<float>> nodes_;  // [0] = root node
 };
@@ -1473,7 +1803,6 @@ extern "C" {
 
 #if defined(_WIN32)
 
-
 // for MultiByteToWideChar and other UTF8 things.
 #if defined(__MINGW32__)
 #include <windows.h>
@@ -1484,6 +1813,7 @@ extern "C" {
 #if defined(__GLIBCXX__)  // mingw
 
 #include <fcntl.h>  // _O_RDONLY
+
 #include <ext/stdio_filebuf.h>  // fstream (all sorts of IO stuff) + stdio_filebuf (=streambuf)
 
 #endif
@@ -1491,8 +1821,6 @@ extern "C" {
 #endif
 
 namespace tinyvdb {
-
-
 
 namespace {
 
@@ -1510,20 +1838,20 @@ static inline std::wstring utf8_to_wchar(const std::string &str) {
 #endif
 
 // TODO(syoyo): Use mmap
-std::vector<uint8_t> read_file_binary(const std::string &filename,std::string *err)
-{
+std::vector<uint8_t> read_file_binary(const std::string &filename,
+                                      std::string *err) {
   std::vector<uint8_t> buf;
 
 #if defined(_WIN32)
 
-#if defined(__GLIBCXX__) // mingw gcc
+#if defined(__GLIBCXX__)  // mingw gcc
   // Assume system have native UTF-8 suport
   int file_descriptor =
       _wopen(utf8_to_wchar(filename).c_str(), _O_RDONLY | _O_BINARY);
   __gnu_cxx::stdio_filebuf<char> wfile_buf(file_descriptor, std::ios_base::in);
   std::istream f(&wfile_buf);
 
-#elif defined(_MSC_VER) // MSC
+#elif defined(_MSC_VER)  // MSC
   // MSVC extension accepts std::wstring for input filename
   std::ifstream ifs(utf8_to_wchar(filename), std::ifstream::binary);
 #else
@@ -1531,13 +1859,12 @@ std::vector<uint8_t> read_file_binary(const std::string &filename,std::string *e
   std::ifstream ifs(filename, std::ifstream::binary);
 #endif
 
-#else // !WIN32
+#else  // !WIN32
 
   // Assume system have native UTF-8 suport
   std::ifstream ifs(filename, std::ifstream::binary);
 
 #endif
-
 
   // TODO(syoyo): Use wstring for error message on Win32?
   if (!ifs) {
@@ -1560,9 +1887,8 @@ std::vector<uint8_t> read_file_binary(const std::string &filename,std::string *e
   if (sz < 16) {
     // ???
     if (err) {
-      (*err) +=
-          "File size too short. Looks like this file is not a VDB : \"" +
-          filename + "\"\n";
+      (*err) += "File size too short. Looks like this file is not a VDB : \"" +
+                filename + "\"\n";
     }
     return buf;
   }
@@ -1576,9 +1902,9 @@ std::vector<uint8_t> read_file_binary(const std::string &filename,std::string *e
   return buf;
 }
 
-} // namespace local
+}  // namespace local
 
-template<typename T>
+template <typename T>
 std::ostream &operator<<(std::ostream &os, const Bounds<T> &bound) {
   os << "Boundsi bmin(" << bound.bmin.x << ", " << bound.bmin.y << ", "
      << bound.bmin.z << "), bmax(" << bound.bmax.x << ", " << bound.bmax.y
@@ -2236,8 +2562,7 @@ bool BitMask<N>::load(StreamReader *sr) {
 }
 #endif
 
-static bool DecompressZip(uint8_t *dst,
-                          size_t *uncompressed_size /* inout */,
+static bool DecompressZip(uint8_t *dst, size_t *uncompressed_size /* inout */,
                           const uint8_t *src, size_t src_size) {
   if ((*uncompressed_size) == src_size) {
     // Data is not compressed.
@@ -2252,8 +2577,10 @@ static bool DecompressZip(uint8_t *dst,
     return false;
   }
 #else
-  mz_ulong sz = static_cast<mz_ulong>(*uncompressed_size); // 32bit in Win64 llvm-mingw(clang)
-  int ret = mz_uncompress(&tmpBuf.at(0), &sz, src, static_cast<mz_ulong>(src_size));
+  mz_ulong sz = static_cast<mz_ulong>(
+      *uncompressed_size);  // 32bit in Win64 llvm-mingw(clang)
+  int ret =
+      mz_uncompress(&tmpBuf.at(0), &sz, src, static_cast<mz_ulong>(src_size));
   if (MZ_OK != ret) {
     return false;
   }
@@ -2274,16 +2601,19 @@ static bool DecompressBlosc(uint8_t *dst, size_t uncompressed_size,
     return true;
   }
 
-  std::cout << "DBG: uncompressed_size = " << uncompressed_size << ", src_size = " << src_size << std::endl;
+  std::cout << "DBG: uncompressed_size = " << uncompressed_size
+            << ", src_size = " << src_size << std::endl;
   const int numUncompressedBytes = blosc_decompress_ctx(
       /*src=*/src, /*dest=*/dst, src_size, /*numthreads=*/1);
 
-  std::cout << "DBG: numUncompressedBytes = " << numUncompressedBytes << ", src_size = " << src_size << std::endl;
+  std::cout << "DBG: numUncompressedBytes = " << numUncompressedBytes
+            << ", src_size = " << src_size << std::endl;
 
   if (numUncompressedBytes < 1) {
     // TODO(syoyo): print warning.
     //
-    // numUncompressedBytes may be 0 for small dataset(e.g. <= 16bytes), so 0 or negative may be accepted.
+    // numUncompressedBytes may be 0 for small dataset(e.g. <= 16bytes), so 0 or
+    // negative may be accepted.
   }
 
   if (numUncompressedBytes != int(uncompressed_size)) {
@@ -2449,8 +2779,7 @@ static bool ReadValues(StreamReader *sr, const uint32_t compression_flags,
 static bool ReadMaskValues(StreamReader *sr, const uint32_t compression_flags,
                            const uint32_t file_version, const Value background,
                            size_t num_values, ValueType value_type,
-                           NodeMask value_mask,
-                           std::vector<uint8_t> *values,
+                           NodeMask value_mask, std::vector<uint8_t> *values,
                            std::string *warn, std::string *err) {
   // Advance stream position when destination buffer is null.
   const bool seek = (values == NULL);
@@ -2558,10 +2887,10 @@ static bool ReadMaskValues(StreamReader *sr, const uint32_t compression_flags,
 }
 
 bool NodeMask::load(StreamReader *sr) {
-
   bool ret = sr->read(this->memUsage(), this->memUsage(), bits.data());
   if (!ret) {
-    std::cout << "DBG: mWords size = " << this->memUsage() << ", ret = " << ret << std::endl;
+    std::cout << "DBG: mWords size = " << this->memUsage() << ", ret = " << ret
+              << std::endl;
   }
 
   return ret;
@@ -2573,7 +2902,8 @@ bool RootNode::ReadTopology(StreamReader *sr, int level,
   std::cout << "Root background loc " << sr->tell() << std::endl;
 
   // Read background value;
-  if (!ReadValue(sr, grid_layout_info_.GetNodeInfo(level).value_type(), &background_)) {
+  if (!ReadValue(sr, grid_layout_info_.GetNodeInfo(level).value_type(),
+                 &background_)) {
     return false;
   }
 
@@ -2606,7 +2936,8 @@ bool RootNode::ReadTopology(StreamReader *sr, int level,
     sr->read4(&vec[0]);
     sr->read4(&vec[1]);
     sr->read4(&vec[2]);
-    if (!ReadValue(sr, grid_layout_info_.GetNodeInfo(level).value_type(), &value)) {
+    if (!ReadValue(sr, grid_layout_info_.GetNodeInfo(level).value_type(),
+                   &value)) {
       return false;
     }
 
@@ -2907,7 +3238,8 @@ bool InternalOrLeafNode::ReadBuffer(StreamReader *sr, int level,
                           &data_, warn, err);
 
     // HACK
-    if (4 == GetValueTypeSize(grid_layout_info_.GetNodeInfo(level).value_type())) {
+    if (4 ==
+        GetValueTypeSize(grid_layout_info_.GetNodeInfo(level).value_type())) {
       const float *ptr = reinterpret_cast<const float *>(data_.data());
       for (size_t i = 0; i < read_count; i++) {
         std::cout << "[" << i << "] = " << ptr[i] << "\n";
@@ -2940,13 +3272,15 @@ GridDescriptor::GridDescriptor(const std::string &name,
 
 // GridDescriptor::~GridDescriptor() {}
 
-std::string GridDescriptor::AddSuffix(const std::string &name, int n, const std::string &separator) {
+std::string GridDescriptor::AddSuffix(const std::string &name, int n,
+                                      const std::string &separator) {
   std::ostringstream ss;
   ss << name << separator << n;
   return ss.str();
 }
 
-std::string GridDescriptor::StripSuffix(const std::string &name, const std::string &separator) {
+std::string GridDescriptor::StripSuffix(const std::string &name,
+                                        const std::string &separator) {
   return name.substr(0, name.find(separator));
 }
 
@@ -3355,8 +3689,8 @@ VDBStatus ParseVDBHeader(const uint8_t *data, const size_t len,
   if (file_version >= TINYVDB_FILE_VERSION_SELECTIVE_COMPRESSION &&
       file_version < TINYVDB_FILE_VERSION_NODE_MASK_COMPRESSION) {
     sr.read1(&is_compressed);
-    std::cout << "Global Compression : " << (is_compressed != 0 ? "zip" : "none")
-              << std::endl;
+    std::cout << "Global Compression : "
+              << (is_compressed != 0 ? "zip" : "none") << std::endl;
   }
 
   // 6) Read uuid.
@@ -3600,20 +3934,35 @@ bool VoxelTree::Build(const RootNode &root, std::string *err) {
 }
 
 std::string GetStatusString(VDBStatus status) {
+  std::string str;
   switch (status) {
-    case TINYVDBIO_SUCCESS:
-      return "SUCCESS";
-    case TINYVDBIO_ERROR_INVALID_FILE:
-      return "ERROR_INVALID_FILE";
-    case TINYVDBIO_ERROR_INVALID_HEADER:
-      return "ERROR_INVALID_HEADER";
-    case TINYVDBIO_ERROR_INVALID_DATA:
-      return "ERROR_INVALID_DATA";
-    case TINYVDBIO_ERROR_INVALID_ARGUMENT:
-      return "ERROR_INVALID_ARGUMENT";
-    case TINYVDBIO_ERROR_UNIMPLEMENTED:
-      return "ERROR_INVALID_UNIMPLEMENTED";
+    case TINYVDBIO_SUCCESS: {
+      str = "SUCCESS";
+      break;
+    }
+    case TINYVDBIO_ERROR_INVALID_FILE: {
+      str = "ERROR_INVALID_FILE";
+      break;
+    }
+    case TINYVDBIO_ERROR_INVALID_HEADER: {
+      str = "ERROR_INVALID_HEADER";
+      break;
+    }
+    case TINYVDBIO_ERROR_INVALID_DATA: {
+      str = "ERROR_INVALID_DATA";
+      break;
+    }
+    case TINYVDBIO_ERROR_INVALID_ARGUMENT: {
+      str = "ERROR_INVALID_ARGUMENT";
+      break;
+    }
+    case TINYVDBIO_ERROR_UNIMPLEMENTED: {
+      str = "ERROR_INVALID_UNIMPLEMENTED";
+      break;
+    }
   }
+
+  return str;
 }
 
 }  // namespace tinyvdb
